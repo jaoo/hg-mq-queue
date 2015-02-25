@@ -1,12 +1,383 @@
 # HG changeset patch
-# Parent 588b1bc232e15d9d1b80f17de41f96140e65aa00
+# Parent 3188674ed07f6c45a26e8e84aa2a8de310536450
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm
 
+diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
+--- a/browser/app/profile/firefox.js
++++ b/browser/app/profile/firefox.js
+@@ -1463,16 +1463,19 @@ pref("devtools.performance.ui.flatten-tr
+ pref("devtools.performance.ui.show-platform-data", false);
+ pref("devtools.performance.ui.show-idle-blocks", true);
+ pref("devtools.performance.ui.enable-memory", false);
+ pref("devtools.performance.ui.enable-framerate", true);
+ 
+ // The default cache UI setting
+ pref("devtools.cache.disabled", false);
+ 
++// The default service workers UI setting
++pref("devtools.serviceWorkers.testing.enabled", false);
++
+ // Enable the Network Monitor
+ pref("devtools.netmonitor.enabled", true);
+ 
+ // The default Network Monitor UI settings
+ pref("devtools.netmonitor.panes-network-details-width", 550);
+ pref("devtools.netmonitor.panes-network-details-height", 450);
+ pref("devtools.netmonitor.statistics", true);
+ pref("devtools.netmonitor.filters", "[\"all\"]");
+diff --git a/browser/devtools/framework/toolbox-options.xul b/browser/devtools/framework/toolbox-options.xul
+--- a/browser/devtools/framework/toolbox-options.xul
++++ b/browser/devtools/framework/toolbox-options.xul
+@@ -143,16 +143,20 @@
+         <vbox id="context-options" class="options-groupbox">
+           <checkbox id="devtools-disable-cache"
+                     label="&options.disableCache.label2;"
+                     tooltiptext="&options.disableCache.tooltip2;"
+                     data-pref="devtools.cache.disabled"/>
+           <checkbox id="devtools-disable-javascript"
+                     label="&options.disableJavaScript.label;"
+                     tooltiptext="&options.disableJavaScript.tooltip;"/>
++          <checkbox id="devtools-enable-serviceWorkersTesting"
++                    label="&options.enableServiceWorkersTesting.label;"
++                    tooltiptext="&options.enableServiceWorkersTesting.tooltip;"
++                    data-pref="devtools.serviceWorkers.testing.enabled"/>
+           <hbox class="hidden-labels-box">
+             <checkbox label="&options.enableChrome.label4;"
+                       tooltiptext="&options.enableChrome.tooltip2;"
+                       data-pref="devtools.chrome.enabled"/>
+           </hbox>
+           <hbox class="hidden-labels-box">
+             <checkbox label="&options.enableRemote.label3;"
+                       tooltiptext="&options.enableRemote.tooltip;"
+diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/toolbox.js
+--- a/browser/devtools/framework/toolbox.js
++++ b/browser/devtools/framework/toolbox.js
+@@ -311,16 +311,17 @@ Toolbox.prototype = {
+ 
+         let framesMenu = this.doc.getElementById("command-button-frames");
+         framesMenu.addEventListener("command", this.selectFrame, true);
+ 
+         this._buildDockButtons();
+         this._buildOptions();
+         this._buildTabs();
+         this._applyCacheSettings();
++        this._applyServiceWorkersTestingSettings();
+         this._addKeysToWindow();
+         this._addReloadKeys();
+         this._addHostListeners();
+         if (this._hostOptions && this._hostOptions.zoom === false) {
+           this._disableZoomKeys();
+         } else {
+           this._addZoomKeys();
+           this._loadInitialZoom();
+@@ -376,18 +377,23 @@ Toolbox.prototype = {
+    * @param  {Object} data
+    *         {
+    *           newValue: The new value
+    *           oldValue:  The old value
+    *           pref: The name of the preference that has changed
+    *         }
+    */
+   _prefChanged: function(event, data) {
+-    if (data.pref === "devtools.cache.disabled") {
++    switch(data.pref) {
++    case "devtools.cache.disabled":
+       this._applyCacheSettings();
++      break;
++    case "devtools.serviceWorkers.testing.enabled":
++      this._applyServiceWorkersTestingSettings();
++      break;
+     }
+   },
+ 
+   _buildOptions: function() {
+     let key = this.doc.getElementById("toolbox-options-key");
+     key.addEventListener("command", () => {
+       this.selectTool("options");
+     }, true);
+@@ -717,16 +723,32 @@ Toolbox.prototype = {
+     let cacheDisabled = Services.prefs.getBoolPref(pref);
+ 
+     if (this.target.activeTab) {
+       this.target.activeTab.reconfigure({"cacheDisabled": cacheDisabled});
+     }
+   },
+ 
+   /**
++   * Apply the current service workers testing setting from
++   * devtools.serviceWorkers.testing.enabled to this toolbox's tab.
++   */
++  _applyServiceWorkersTestingSettings: function() {
++    let pref = "devtools.serviceWorkers.testing.enabled";
++    let serviceWorkersTestingEnabled =
++      Services.prefs.getBoolPref(pref) || false;
++
++    if (this.target.activeTab) {
++      this.target.activeTab.reconfigure({
++        "serviceWorkersTestingEnabled": serviceWorkersTestingEnabled
++      });
++    }
++  },
++
++  /**
+    * Setter for the checked state of the picker button in the toolbar
+    * @param {Boolean} isChecked
+    */
+   set pickerButtonChecked(isChecked) {
+     if (isChecked) {
+       this._pickerButton.setAttribute("checked", "true");
+     } else {
+       this._pickerButton.removeAttribute("checked");
+@@ -1628,20 +1650,23 @@ Toolbox.prototype = {
+ 
+         outstanding.push(panel.destroy());
+       } catch (e) {
+         // We don't want to stop here if any panel fail to close.
+         console.error("Panel " + id + ":", e);
+       }
+     }
+ 
+-    // Now that we are closing the toolbox we can re-enable JavaScript for the
+-    // current tab.
++    // Now that we are closing the toolbox we can re-enable the cache settings
++    // and disable the service workers testing settings for the current tab.
+     if (this.target.activeTab) {
+-      this.target.activeTab.reconfigure({"cacheDisabled": false});
++      this.target.activeTab.reconfigure({
++        "cacheDisabled": false,
++        "serviceWorkersTestingEnabled": false
++      });
+     }
+ 
+     // Destroying the walker and inspector fronts
+     outstanding.push(this.destroyInspector().then(() => {
+       // Removing buttons
+       if (this._pickerButton) {
+         this._pickerButton.removeEventListener("command", this._togglePicker, false);
+         this._pickerButton = null;
+diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
+--- a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
++++ b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
+@@ -88,16 +88,22 @@
+ <!ENTITY options.disableJavaScript.tooltip   "Turning this option on will disable JavaScript for the current tab. If the tab or the toolbox is closed then this setting will be forgotten.">
+ 
+ <!-- LOCALIZATION NOTE (options.disableCache.label2,
+   -  options.disableCache.tooltip2): This is the options panel label and
+   -  tooltip for the checkbox that toggles the cache on or off. -->
+ <!ENTITY options.disableCache.label2     "Disable Cache (when toolbox is open)">
+ <!ENTITY options.disableCache.tooltip2   "Turning this option on will disable the cache for all tabs that have the toolbox open.">
+ 
++<!-- LOCALIZATION NOTE (options.enableServiceWorkersTesting.label,
++  -  options.enableServiceWorkersTesting.tooltip): This is the options panel label and
++  -  tooltip for the checkbox that toggles the service workers testing features on or off. -->
++<!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workes testing features (when toolbox is open)">
++<!ENTITY options.enableServiceWorkersTesting.tooltip   "Turning this option on will enable the service workers testing features for all tabs that have the toolbox open.">
++
+ <!-- LOCALIZATION NOTE (options.selectDefaultTools.label): This is the label for
+   -  the heading of group of checkboxes corresponding to the default developer
+   -  tools. -->
+ <!ENTITY options.selectDefaultTools.label     "Default Firefox Developer Tools">
+ 
+ <!-- LOCALIZATION NOTE (options.selectAdditionalTools.label): This is the label for
+   -  the heading of group of checkboxes corresponding to the developer tools
+   -  added by add-ons. This heading is hidden when there is no developer tool
+diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
+--- a/dom/base/nsDOMWindowUtils.cpp
++++ b/dom/base/nsDOMWindowUtils.cpp
+@@ -3948,16 +3948,29 @@ nsDOMWindowUtils::GetFramesReflowed(uint
+   if (!presContext) {
+     return NS_ERROR_NOT_AVAILABLE;
+   }
+ 
+   *aResult = presContext->FramesReflowedCount();
+   return NS_OK;
+ }
+ 
++NS_IMETHODIMP
++nsDOMWindowUtils::EnableServiceWorkersTesting(bool aEnable)
++{
++  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
++
++  nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
++  NS_ENSURE_STATE(window);
++
++  window->SetServiceWorkersTestingEnabled(aEnable);
++
++  return NS_OK;
++}
++
+ NS_INTERFACE_MAP_BEGIN(nsTranslationNodeList)
+   NS_INTERFACE_MAP_ENTRY(nsISupports)
+   NS_INTERFACE_MAP_ENTRY(nsITranslationNodeList)
+ NS_INTERFACE_MAP_END
+ 
+ NS_IMPL_ADDREF(nsTranslationNodeList)
+ NS_IMPL_RELEASE(nsTranslationNodeList)
+ 
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -580,17 +580,18 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWind
+   mMayHaveMouseEnterLeaveEventListener(false),
+   mMayHavePointerEnterLeaveEventListener(false),
+   mIsModalContentWindow(false),
+   mIsActive(false), mIsBackground(false),
+   mAudioMuted(false), mAudioVolume(1.0),
+   mInnerWindow(nullptr), mOuterWindow(aOuterWindow),
+   // Make sure no actual window ends up with mWindowID == 0
+   mWindowID(NextWindowID()), mHasNotifiedGlobalCreated(false),
+-  mMarkedCCGeneration(0), mSendAfterRemotePaint(false)
++  mMarkedCCGeneration(0), mSendAfterRemotePaint(false),
++  mServiceWorkersTestingEnabled(false)
+  {}
+ 
+ nsPIDOMWindow::~nsPIDOMWindow() {}
+ 
+ // DialogValueHolder CC goop.
+ NS_IMPL_CYCLE_COLLECTION(DialogValueHolder, mValue)
+ 
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DialogValueHolder)
+diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
+--- a/dom/base/nsPIDOMWindow.h
++++ b/dom/base/nsPIDOMWindow.h
+@@ -173,16 +173,27 @@ public:
+   bool GetAudioMuted() const;
+   void SetAudioMuted(bool aMuted);
+ 
+   float GetAudioVolume() const;
+   nsresult SetAudioVolume(float aVolume);
+ 
+   float GetAudioGlobalVolume();
+ 
++  virtual void SetServiceWorkersTestingEnabled(bool aServiceWorkersTestingEnabled)
++  {
++    MOZ_ASSERT(IsOuterWindow());
++    mServiceWorkersTestingEnabled = aServiceWorkersTestingEnabled;
++  }
++  bool ServiceWorkersTestingEnabled()
++  {
++    MOZ_ASSERT(IsOuterWindow());
++    return mServiceWorkersTestingEnabled;
++  }
++
+ protected:
+   // Lazily instantiate an about:blank document if necessary, and if
+   // we have what it takes to do so.
+   void MaybeCreateDoc();
+ 
+   float GetAudioGlobalVolumeInternal(float aVolume);
+   void RefreshMediaElements();
+ 
+@@ -853,16 +864,20 @@ protected:
+   // the (chrome|content)-document-global-created notification.
+   bool mHasNotifiedGlobalCreated;
+ 
+   uint32_t mMarkedCCGeneration;
+ 
+   // If true, send an NS_AFTER_REMOTE_PAINT message before compositing in a
+   // non-e10s implementation.
+   bool mSendAfterRemotePaint;
++
++  // Let the service workers plumbing know that some feature are enabled while
++  // testing.
++  bool mServiceWorkersTestingEnabled;
+ };
+ 
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindow, NS_PIDOMWINDOW_IID)
+ 
+ #ifdef MOZILLA_INTERNAL_API
+ PopupControlState
+ PushPopupControlState(PopupControlState aState, bool aForce);
+diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsIDOMWindowUtils.idl
+--- a/dom/interfaces/base/nsIDOMWindowUtils.idl
++++ b/dom/interfaces/base/nsIDOMWindowUtils.idl
+@@ -45,17 +45,17 @@ interface nsIFile;
+ interface nsIDOMClientRect;
+ interface nsIURI;
+ interface nsIDOMEventTarget;
+ interface nsIRunnable;
+ interface nsITranslationNodeList;
+ interface nsIJSRAIIHelper;
+ interface nsIContentPermissionRequest;
+ 
+-[scriptable, uuid(d0461871-31bd-4da1-b22d-24595c27295c)]
++[scriptable, uuid(7f2f44ab-2857-4cc2-8c9d-3d9816f5a4d6)]
+ interface nsIDOMWindowUtils : nsISupports {
+ 
+   /**
+    * Image animation mode of the window. When this attribute's value
+    * is changed, the implementation should set all images in the window
+    * to the given value. That is, when set to kDontAnimMode, all images
+    * will stop animating. The attribute's value must be one of the
+    * animationMode values from imgIContainer.
+@@ -1744,16 +1744,21 @@ interface nsIDOMWindowUtils : nsISupport
+    * Controls the amount of chrome that should be visible on each side of
+    * the window. Works like the chromemargin xul:window attribute.
+    * This should only be used with non-XUL windows.
+    */
+   void setChromeMargin(in int32_t aTop,
+                        in int32_t aRight,
+                        in int32_t aBottom,
+                        in int32_t aLeft);
++
++  /**
++   * Enable some service workers testing features.
++   */
++  void enableServiceWorkersTesting(in boolean aEnable);
+ };
+ 
+ [scriptable, uuid(c694e359-7227-4392-a138-33c0cc1f15a6)]
+ interface nsITranslationNodeList : nsISupports {
+   readonly attribute unsigned long length;
+   nsIDOMNode item(in unsigned long index);
+ 
+   // A translation root is a block element, or an inline element
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -501,16 +501,26 @@ public:
+@@ -447,36 +447,39 @@ class ServiceWorkerRegisterJob MOZ_FINAL
+ {
+   friend class ContinueInstallTask;
+ 
+   nsCString mScope;
+   nsCString mScriptSpec;
+   nsRefPtr<ServiceWorkerRegistrationInfo> mRegistration;
+   nsRefPtr<ServiceWorkerUpdateFinishCallback> mCallback;
+   nsCOMPtr<nsIPrincipal> mPrincipal;
++  nsCOMPtr<nsIDOMWindow> mWindow;
+ 
+   ~ServiceWorkerRegisterJob()
+   { }
+ 
+   enum
+   {
+     REGISTER_JOB = 0,
+     UPDATE_JOB = 1,
+   } mJobType;
+ 
+ public:
+   NS_DECL_ISUPPORTS
+ 
+   // [[Register]]
+   ServiceWorkerRegisterJob(ServiceWorkerJobQueue* aQueue,
++                           nsIDOMWindow* aWindow,
+                            const nsCString& aScope,
+                            const nsCString& aScriptSpec,
+                            ServiceWorkerUpdateFinishCallback* aCallback,
+                            nsIPrincipal* aPrincipal)
+     : ServiceWorkerJob(aQueue)
++    , mWindow(aWindow)
+     , mScope(aScope)
+     , mScriptSpec(aScriptSpec)
+     , mCallback(aCallback)
+     , mPrincipal(aPrincipal)
+     , mJobType(REGISTER_JOB)
+   { }
+ 
+   // [[Update]]
+@@ -501,16 +504,28 @@ public:
        swm->AppendPendingOperation(runnable);
        return;
      }
@@ -15,11 +386,13 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
        mRegistration = swm->GetRegistration(mScope);
  
        if (mRegistration) {
++        nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(mWindow);
++        nsCOMPtr<nsPIDOMWindow> outerWindow = window->GetOuterWindow();
 +        bool alwaysUpdate = false;
-+        if (Preferences::GetBool("dom.serviceWorkers.testing.enabled")) {
++        if (Preferences::GetBool("dom.serviceWorkers.testing.enabled") ||
++            outerWindow->ServiceWorkersTestingEnabled()) {
 +          alwaysUpdate = true;
 +        }
-+        // TODO: If devtools are open, update always as well.
 +        if (alwaysUpdate) {
 +          Update();
 +          return;
@@ -33,6 +406,25 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
            Done(NS_OK);
            return;
          }
+@@ -945,17 +960,17 @@ ServiceWorkerManager::Register(nsIDOMWin
+ 
+   ServiceWorkerJobQueue* queue = GetOrCreateJobQueue(cleanedScope);
+   MOZ_ASSERT(queue);
+ 
+   nsRefPtr<ServiceWorkerResolveWindowPromiseOnUpdateCallback> cb =
+     new ServiceWorkerResolveWindowPromiseOnUpdateCallback(window, promise);
+ 
+   nsRefPtr<ServiceWorkerRegisterJob> job =
+-    new ServiceWorkerRegisterJob(queue, cleanedScope, spec, cb, documentPrincipal);
++    new ServiceWorkerRegisterJob(queue, aWindow, cleanedScope, spec, cb, documentPrincipal);
+   queue->Append(job);
+ 
+   promise.forget(aPromise);
+   return NS_OK;
+ }
+ 
+ void
+ ServiceWorkerManager::AppendPendingOperation(ServiceWorkerJobQueue* aQueue,
 diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
 --- a/modules/libpref/init/all.js
 +++ b/modules/libpref/init/all.js
@@ -46,7 +438,7 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  pref("dom.serviceWorkers.enabled", true);
  
 +// Service workers testing
-+pref("dom.serviceWorkers.testing.enabled", true);
++pref("dom.serviceWorkers.testing.enabled", false);
 +
  // Whether nonzero values can be returned from performance.timing.*
  pref("dom.enable_performance", true);
@@ -56,3 +448,78 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  
  // Enable high-resolution timing markers for users
  pref("dom.enable_user_timing", true);
+diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/server/actors/webbrowser.js
+--- a/toolkit/devtools/server/actors/webbrowser.js
++++ b/toolkit/devtools/server/actors/webbrowser.js
+@@ -1164,37 +1164,42 @@ TabActor.prototype = {
+   },
+ 
+   /**
+    * Reconfigure options.
+    */
+   onReconfigure: function (aRequest) {
+     let options = aRequest.options || {};
+ 
+-    this._toggleJsOrCache(options);
++    this._toggleDevtoolsSettings(options);
+     return {};
+   },
+ 
+   /**
+-   * Handle logic to enable/disable JS/cache.
++   * Handle logic to enable/disable JS/cache/Service Worker testing.
+    */
+-  _toggleJsOrCache: function(options) {
++  _toggleDevtoolsSettings: function(options) {
+     // Wait a tick so that the response packet can be dispatched before the
+     // subsequent navigation event packet.
+     let reload = false;
+ 
+     if (typeof options.javascriptEnabled !== "undefined" &&
+         options.javascriptEnabled !== this._getJavascriptEnabled()) {
+       this._setJavascriptEnabled(options.javascriptEnabled);
+       reload = true;
+     }
+     if (typeof options.cacheDisabled !== "undefined" &&
+         options.cacheDisabled !== this._getCacheDisabled()) {
+       this._setCacheDisabled(options.cacheDisabled);
+     }
++    if (typeof options.serviceWorkersTestingEnabled !== "undefined") {
++      this._setServiceWorkersTestingEnabled(
++        options.serviceWorkersTestingEnabled
++      );
++    }
+ 
+     // Reload if:
+     //  - there's an explicit `performReload` flag and it's true
+     //  - there's no `performReload` flag, but it makes sense to do so
+     let hasExplicitReloadFlag = "performReload" in options;
+     if ((hasExplicitReloadFlag && options.performReload) ||
+        (!hasExplicitReloadFlag && reload)) {
+       this.onReload();
+@@ -1219,16 +1224,25 @@ TabActor.prototype = {
+    */
+   _setJavascriptEnabled: function(allow) {
+     if (this.docShell) {
+       this.docShell.allowJavascript = allow;
+     }
+   },
+ 
+   /**
++   * Disable or enable the service workers testing features.
++   */
++  _setServiceWorkersTestingEnabled: function(enabled) {
++    let windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
++                                 .getInterface(Ci.nsIDOMWindowUtils);
++    windowUtils.enableServiceWorkersTesting(enabled);
++  },
++
++  /**
+    * Return cache allowed status.
+    */
+   _getCacheDisabled: function() {
+     if (!this.docShell) {
+       // The tab is already closed.
+       return null;
+     }
+ 
