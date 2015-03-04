@@ -74,4 +74,7 @@ android_pkg_name.patch
 bug1132141_ref_failure.patch
 rebase_cache_again.patch
 bug1131874_persist_activat_fix.patch
+1041339.patch
 1134329.patch
+1003991.patch
+1137245.patch
