@@ -1,8 +1,273 @@
 # HG changeset patch
-# Parent 8b83404b31c666dd71d66b52348ba48e2498686a
+# Parent 38dd194ccfac3cc65da2a3efe01aaed5cc98c57d
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm
 
+diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/framework/test/browser.ini
+--- a/browser/devtools/framework/test/browser.ini
++++ b/browser/devtools/framework/test/browser.ini
+@@ -4,16 +4,17 @@ support-files =
+   browser_toolbox_options_disable_js.html
+   browser_toolbox_options_disable_js_iframe.html
+   browser_toolbox_options_disable_cache.sjs
+   browser_toolbox_sidebar_tool.xul
+   head.js
+   helper_disable_cache.js
+   doc_theme.css
+   browser_toolbox_options_enable_serviceworkers_testing.html
++  browser_toolbox_options_enable_serviceworkers_testing_alwaysupdate.html
+   worker.js
+ 
+ [browser_devtools_api.js]
+ [browser_devtools_api_destroy.js]
+ [browser_dynamic_tool_enabling.js]
+ [browser_keybindings.js]
+ [browser_new_activation_workflow.js]
+ [browser_target_events.js]
+@@ -50,12 +51,13 @@ skip-if = e10s # Bug 1069044 - destroyIn
+ [browser_toolbox_window_shortcuts.js]
+ skip-if = os == "mac" && os_version == "10.8" || os == "win" && os_version == "5.1" # Bug 851129 - Re-enable browser_toolbox_window_shortcuts.js test after leaks are fixed
+ [browser_toolbox_window_title_changes.js]
+ [browser_toolbox_zoom.js]
+ [browser_toolbox_custom_host.js]
+ [browser_toolbox_theme_registration.js]
+ [browser_toolbox_options_enable_serviceworkers_testing.js]
+ skip-if = e10s # Bug 1030318
++[browser_toolbox_options_enable_serviceworkers_testing_alwaysupdate.js]
+ 
+ # We want this test to run for mochitest-dt as well, so we include it here:
+ [../../../base/content/test/general/browser_parsable_css.js]
+ 
+diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
+--- a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
++++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
+@@ -1,12 +1,12 @@
+ <!DOCTYPE html>
+ <html>
+   <head>
+-    <title>browser_toolbox_options_enable_serviceworkers_testing.html</title>
++    <title>browser_toolbox_options_enable_serviceworkers_testing_alwaysupdate.html</title>
+     <meta charset="UTF-8">
+     <style>
+       div {
+         width: 260px;
+         height: 24px;
+         border: 1px solid #000;
+         margin-top: 10px;
+       }
+diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_alwaysupdate.html b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_alwaysupdate.html
+new file mode 100644
+--- /dev/null
++++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_alwaysupdate.html
+@@ -0,0 +1,53 @@
++<!DOCTYPE html>
++<html>
++  <head>
++    <title>browser_toolbox_options_enable_serviceworkers_testing.html</title>
++    <meta charset="UTF-8">
++    <style>
++      div {
++        width: 260px;
++        height: 24px;
++        border: 1px solid #000;
++        margin-top: 10px;
++      }
++
++      h1 {
++        font-size: 20px
++      }      
++    </style>
++    <script type="application/javascript;version=1.8">
++      function log(msg) {
++        var output = document.getElementById("output");
++
++        output.innerHTML = msg;
++      }
++
++      navigator.serviceWorker.register("worker.js").then(
++        swr => {
++          var msg = "";    
++          var button = document.getElementById("button");
++          if (swr.installing) {
++            msg += "Installing worker/";
++          }
++          if (swr.waiting) {
++            msg += "Waiting worker/";
++          }
++          if (swr.active) {
++            msg += "Active worker/";
++          }
++          log(msg);
++          button.click();
++         },
++         error => {
++      });
++    </script>
++  </head>
++  <body>
++    <h1>Test in page</h1>
++    <input id="button"
++           type="button"
++           value="Worker clicks here"/>
++    <br>
++    <div id="output">No output</div>
++  </body>
++</html>
+diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_alwaysupdate.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_alwaysupdate.js
+new file mode 100644
+--- /dev/null
++++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_alwaysupdate.js
+@@ -0,0 +1,150 @@
++/* Any copyright is dedicated to the Public Domain.
++ * http://creativecommons.org/publicdomain/zero/1.0/ */
++
++// Test that enabling Service Workers testing option enables the
++// mServiceWorkersTestingEnabled attribute added to nsPIDOMWindow.
++
++const TEST_URI = URL_ROOT +
++                 "browser_toolbox_options_enable_serviceworkers_testing_alwaysupdate.html";
++
++const ELEMENT_ID = "devtools-enable-serviceWorkersTesting";
++
++let toolbox;
++let doc;
++
++function test() {
++  gBrowser.selectedTab = gBrowser.addTab();
++  let target = TargetFactory.forTab(gBrowser.selectedTab);
++
++  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
++    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
++    doc = content.document;
++    gDevTools.showToolbox(target).then(testSelectTool);
++  }, true);
++
++  content.location = TEST_URI;
++}
++
++function testSelectTool(aToolbox) {
++  toolbox = aToolbox;
++  toolbox.once("options-selected", testRegisterInstallingWorker);
++  toolbox.selectTool("options");
++}
++
++function testRegisterInstallingWorker() {
++  toggleServiceWorkersTestingCheckbox().then(() => {
++    let output = doc.getElementById("output");
++    let button = doc.getElementById("button");
++
++    function doTheCheck() {
++      is(output.textContent, "Installing worker/", "Installing worker expected");
++      testRegisterActiveWorker();
++    }
++
++    if (output.textContent !== "No output") {
++      doTheCheck();
++    }
++
++    button.addEventListener('click', function onClick() {
++      button.addEventListener('click', onClick);
++      doTheCheck();
++    });
++  });
++}
++
++function testRegisterActiveWorker() {
++  reload().then(() => {
++    let output = doc.getElementById("output");
++    let button = doc.getElementById("button");
++
++    function doTheCheck() {
++      is(output.textContent,
++         "Installing worker/Active worker/",
++         "Installing and active worker expected");
++      testRegisterWaitingWorker();
++    }
++
++    if (output.textContent !== "No output") {
++      doTheCheck();
++    }
++
++    button.addEventListener('click', function onClick() {
++      button.addEventListener('click', onClick);
++      doTheCheck();
++    });
++  });
++}
++
++function testRegisterWaitingWorker() {
++  reload().then(() => {
++    let output = doc.getElementById("output");
++    let button = doc.getElementById("button");
++
++    function doTheCheck() {
++      is(output.textContent,
++         "Installing worker/Waiting worker/Active worker/",
++         "Installing, waiting and active worker expected");
++      finishUp();
++    }
++
++    if (output.textContent !== "No output") {
++      doTheCheck();
++    }
++
++    button.addEventListener('click', function onClick() {
++      button.addEventListener('click', onClick);
++      doTheCheck();
++    });
++  });
++}
++
++function toggleServiceWorkersTestingCheckbox() {
++  let deferred = promise.defer();
++
++  let panel = toolbox.getCurrentPanel();
++  let cbx = panel.panelDoc.getElementById(ELEMENT_ID);
++
++  cbx.scrollIntoView();
++
++  if (cbx.checked) {
++    info("Clearing checkbox to disable service workers testing");
++  } else {
++    info("Checking checkbox to enable service workers testing");
++  }
++
++  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
++    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
++    doc = content.document;
++    deferred.resolve();
++  }, true);
++
++  cbx.click();
++
++  let mm = getFrameScript();
++  mm.sendAsyncMessage("devtools:test:reload");
++
++  return deferred.promise;
++}
++
++function reload() {
++  let deferred = promise.defer();
++
++  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
++    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
++    doc = content.document;
++    deferred.resolve();
++  }, true);
++
++  let mm = getFrameScript();
++  mm.sendAsyncMessage("devtools:test:reload");
++
++  return deferred.promise;
++}
++
++function finishUp() {
++  toolbox.destroy().then(function() {
++    gBrowser.removeCurrentTab();
++    toolbox = doc = null;
++    finish();
++  });
++}
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
