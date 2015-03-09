@@ -81,7 +81,7 @@ diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/fram
  [browser_toolbox_zoom.js]
  [browser_toolbox_custom_host.js]
  [browser_toolbox_theme_registration.js]
-+[browser_toolbox_options_enable_serviceworkers_testing.js]
++[browser_toolbox_options_enable_serviceworkers_testing_http.js]
 +skip-if = e10s # Bug 1030318
  
  # We want this test to run for mochitest-dt as well, so we include it here:
@@ -91,7 +91,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 new file mode 100644
 --- /dev/null
 +++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,58 @@
 +<!DOCTYPE html>
 +<html>
 +  <head>
@@ -118,11 +118,19 @@ new file mode 100644
 +
 +      navigator.serviceWorker.register("worker.js").then(
 +        swr => {
-+         if (swr.installing) {
-+            var button = document.getElementById("button");
-+            log("Installing worker");
-+            button.click();
++          var msg = "";    
++          var button = document.getElementById("button");
++          if (swr.installing) {
++            msg += "Installing worker/";
 +          }
++          if (swr.waiting) {
++            msg += "Waiting worker/";
++          }
++          if (swr.active) {
++            msg += "Active worker/";
++          }
++          log(msg);
++          button.click();
 +        },
 +        error => {
 +          if (error.name === "SecurityError") {
@@ -142,10 +150,10 @@ new file mode 100644
 +    <div id="output">No output</div>
 +  </body>
 +</html>
-diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
+diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_http.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_http.js
 new file mode 100644
 --- /dev/null
-+++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
++++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_http.js
 @@ -0,0 +1,102 @@
 +/* Any copyright is dedicated to the Public Domain.
 + * http://creativecommons.org/publicdomain/zero/1.0/ */
@@ -186,7 +194,7 @@ new file mode 100644
 +
 +  let msg = "SecurityError";
 +  if (secondPass) {
-+    msg = "Installing worker";
++    msg = "Installing worker/";
 +  }
 +
 +  let output = doc.getElementById("output");
