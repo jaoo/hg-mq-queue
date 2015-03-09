@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent cd3b6891fb71c589609950be6272641e0b359ed9
+# Parent 8a0fe0fdfcf35b08c65b372cdbe362ae6c6a5014
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
-try: -b do -p  -u mochitest-dt[Ubuntu,10.6,10.8,Windows XP,Windows 7,Windows 8] -t none
+try: -b do -p all -u all -t none
 
