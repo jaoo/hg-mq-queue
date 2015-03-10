@@ -1,0 +1,264 @@
+# HG changeset patch
+# User Fernando Jimenez <ferjmoreno@gmail.com>
+# Parent  80987d26adfb2ce743218b81e4e6288c806c63ef
+Bug 1137245 - ServiceWorkerManager should set WorkerPrivate::LoadInfo::mIndexedDBAllowed correctly. r=bent, bkelly
+
+diff --git a/dom/indexedDB/IDBFactory.cpp b/dom/indexedDB/IDBFactory.cpp
+--- a/dom/indexedDB/IDBFactory.cpp
++++ b/dom/indexedDB/IDBFactory.cpp
+@@ -418,16 +418,33 @@ IDBFactory::AllowedForWindowInternal(nsP
+       return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+     }
+   }
+ 
+   principal.forget(aPrincipal);
+   return NS_OK;
+ }
+ 
++// static
++bool
++IDBFactory::AllowedForPrincipal(nsIPrincipal *aPrincipal)
++{
++  MOZ_ASSERT(NS_IsMainThread());
++  MOZ_ASSERT(aPrincipal);
++
++  bool isNullPrincipal;
++  if (NS_WARN_IF(NS_FAILED(aPrincipal->GetIsNullPrincipal(&isNullPrincipal))) ||
++      isNullPrincipal ||
++      NS_WARN_IF(!IndexedDatabaseManager::GetOrCreate())) {
++    return false;
++  }
++
++  return true;
++}
++
+ #ifdef DEBUG
+ 
+ void
+ IDBFactory::AssertIsOnOwningThread() const
+ {
+   MOZ_ASSERT(mOwningThread);
+   MOZ_ASSERT(PR_GetCurrentThread() == mOwningThread);
+ }
+diff --git a/dom/indexedDB/IDBFactory.h b/dom/indexedDB/IDBFactory.h
+--- a/dom/indexedDB/IDBFactory.h
++++ b/dom/indexedDB/IDBFactory.h
+@@ -100,16 +100,19 @@ public:
+                   JS::Handle<JSObject*> aOwningObject,
+                   const PrincipalInfo& aPrincipalInfo,
+                   uint64_t aInnerWindowID,
+                   IDBFactory** aFactory);
+ 
+   static bool
+   AllowedForWindow(nsPIDOMWindow* aWindow);
+ 
++  static bool
++  AllowedForPrincipal(nsIPrincipal* aPrincipal);
++
+   void
+   AssertIsOnOwningThread() const
+ #ifdef DEBUG
+   ;
+ #else
+   { }
+ #endif
+ 
+diff --git a/dom/indexedDB/test/mochitest.ini b/dom/indexedDB/test/mochitest.ini
+--- a/dom/indexedDB/test/mochitest.ini
++++ b/dom/indexedDB/test/mochitest.ini
+@@ -7,16 +7,18 @@ support-files =
+   error_events_abort_transactions_iframe.html
+   event_propagation_iframe.html
+   exceptions_in_events_iframe.html
+   file.js
+   file_app_isolation.html
+   file_app_isolation.js
+   helpers.js
+   leaving_page_iframe.html
++  service_worker.js
++  service_worker_client.html
+   third_party_iframe1.html
+   third_party_iframe2.html
+   unit/test_add_put.js
+   unit/test_add_twice_failure.js
+   unit/test_advance.js
+   unit/test_autoIncrement.js
+   unit/test_autoIncrement_indexes.js
+   unit/test_blob_file_backed.js
+@@ -366,8 +368,9 @@ skip-if = buildapp == 'b2g' || buildapp 
+ [test_webapp_clearBrowserData_inproc_oop.html]
+ # The clearBrowserData tests are only supposed to run in the main process.
+ # They currently time out on android.
+ skip-if = buildapp == 'b2g' || buildapp == 'mulet' || e10s || toolkit == 'android'
+ [test_webapp_clearBrowserData_oop_inproc.html]
+ # The clearBrowserData tests are only supposed to run in the main process.
+ # They currently time out on android.
+ skip-if = buildapp == 'b2g' || buildapp == 'mulet' || e10s || toolkit == 'android'
++[test_serviceworker.html]
+diff --git a/dom/indexedDB/test/service_worker.js b/dom/indexedDB/test/service_worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/indexedDB/test/service_worker.js
+@@ -0,0 +1,10 @@
++onmessage = function(e) {
++  self.clients.matchAll().then(function(res) {
++    if (!res.length) {
++      dump("Error: no clients are currently controlled.\n");
++      return;
++    }
++    res[0].postMessage(indexedDB ? { available: true } :
++                                   { available: false });
++  });
++};
+diff --git a/dom/indexedDB/test/service_worker_client.html b/dom/indexedDB/test/service_worker_client.html
+new file mode 100644
+--- /dev/null
++++ b/dom/indexedDB/test/service_worker_client.html
+@@ -0,0 +1,29 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++<title>controlled page</title>
++<script class="testbody" type="text/javascript">
++  if (!parent) {
++      info("service_worker_client.html should not be launched directly!");
++  }
++
++  window.onload = function() {
++    navigator.serviceWorker.ready.then(function(swr) {
++      parent.postMessage("READY", "*");
++    });
++  }
++
++  window.onmessage = function(msg) {
++    // Forward message to the test page.
++    parent.postMessage(msg.data, "*");
++  };
++</script>
++
++</head>
++<body>
++</body>
++</html>
+diff --git a/dom/indexedDB/test/test_serviceworker.html b/dom/indexedDB/test/test_serviceworker.html
+new file mode 100644
+--- /dev/null
++++ b/dom/indexedDB/test/test_serviceworker.html
+@@ -0,0 +1,72 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1137245 - Allow IndexedDB usage in ServiceWorkers</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++
++  function simpleRegister() {
++    return navigator.serviceWorker.register("service_worker.js", {
++      scope: 'service_worker_client.html'
++    });
++  }
++
++  function testIndexedDBAvailable(sw) {
++    var p = new Promise(function(resolve, reject) {
++      window.onmessage = function(e) {
++        if (e.data === "READY") {
++          sw.active.postMessage("GO");
++          return;
++        }
++
++        if (!("available" in e.data)) {
++          ok(false, "Something went wrong");
++          reject();
++          return;
++        }
++
++        ok(e.data.available, "IndexedDB available in service worker.");
++        resolve();
++      }
++    });
++
++    var content = document.getElementById("content");
++    ok(content, "Parent exists.");
++
++    iframe = document.createElement("iframe");
++    iframe.setAttribute('src', "service_worker_client.html");
++    content.appendChild(iframe);
++
++    return p.then(() => content.removeChild(iframe));
++  }
++
++  function runTest() {
++    simpleRegister()
++      .then(testIndexedDBAvailable)
++      .then(function() {
++        SimpleTest.finish();
++      }).catch(function(e) {
++        ok(false, "Some test failed with error " + e);
++        SimpleTest.finish();
++      });
++  }
++
++  SimpleTest.waitForExplicitFinish();
++  SpecialPowers.pushPrefEnv({"set": [
++    ["dom.serviceWorkers.enabled", true],
++    ["dom.serviceWorkers.testing.enabled", true]
++  ]}, runTest);
++</script>
++</pre>
++</body>
++</html>
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -18,16 +18,17 @@
+ 
+ #include "jsapi.h"
+ 
+ #include "mozilla/LoadContext.h"
+ #include "mozilla/dom/BindingUtils.h"
+ #include "mozilla/dom/DOMError.h"
+ #include "mozilla/dom/ErrorEvent.h"
+ #include "mozilla/dom/Headers.h"
++#include "mozilla/dom/indexedDB/IDBFactory.h"
+ #include "mozilla/dom/InstallEventBinding.h"
+ #include "mozilla/dom/InternalHeaders.h"
+ #include "mozilla/dom/Navigator.h"
+ #include "mozilla/dom/PromiseNativeHandler.h"
+ #include "mozilla/dom/Request.h"
+ #include "mozilla/dom/RootedDictionary.h"
+ #include "mozilla/ipc/BackgroundChild.h"
+ #include "mozilla/ipc/PBackgroundChild.h"
+@@ -2472,16 +2473,19 @@ ServiceWorkerManager::CreateServiceWorke
+ 
+   rv = info.mBaseURI->GetHost(info.mDomain);
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     return rv;
+   }
+ 
+   info.mPrincipal = aPrincipal;
+ 
++  info.mIndexedDBAllowed =
++    indexedDB::IDBFactory::AllowedForPrincipal(aPrincipal);
++
+   // NOTE: this defaults the SW load context to:
+   //  - private browsing = false
+   //  - content = true
+   //  - use remote tabs = false
+   // Alternatively we could persist the original load group values and use
+   // them here.
+   WorkerPrivate::OverrideLoadInfoLoadGroup(info);
+ 
