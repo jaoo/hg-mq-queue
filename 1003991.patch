@@ -1,12 +1,12 @@
 # HG changeset patch
-# Parent 639aea01d396eb7174db68ac2f7a0f80ce635526
+# Parent b6184f34860c0bf8c3876bc2a7c48dad822b7a66
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1003991 - Disable https:// only load for ServiceWorkers when Developer Tools are open. r=nsm
 
 diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
 --- a/browser/app/profile/firefox.js
 +++ b/browser/app/profile/firefox.js
-@@ -1463,16 +1463,19 @@ pref("devtools.performance.ui.flatten-tr
+@@ -1470,16 +1470,19 @@ pref("devtools.performance.ui.flatten-tr
  pref("devtools.performance.ui.show-platform-data", false);
  pref("devtools.performance.ui.show-idle-blocks", true);
  pref("devtools.performance.ui.enable-memory", false);
@@ -446,6 +446,63 @@ diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/
        if (this._pickerButton) {
          this._pickerButton.removeEventListener("command", this._togglePicker, false);
          this._pickerButton = null;
+diff --git a/browser/devtools/profiler/test/browser_profiler_shared-connection-01.js b/browser/devtools/profiler/test/browser_profiler_shared-connection-01.js
+--- a/browser/devtools/profiler/test/browser_profiler_shared-connection-01.js
++++ b/browser/devtools/profiler/test/browser_profiler_shared-connection-01.js
+@@ -8,36 +8,47 @@
+ let gProfilerConnections = 0;
+ Services.obs.addObserver(profilerConnectionObserver, "profiler-connection-created", false);
+ 
+ let test = Task.async(function*() {
+   let firstTab = yield addTab(SIMPLE_URL);
+   let firstTarget = TargetFactory.forTab(firstTab);
+   yield firstTarget.makeRemote();
+ 
+-  yield gDevTools.showToolbox(firstTarget, "webconsole");
++  let toolboxFirstTab;
++  yield gDevTools.showToolbox(firstTarget, "webconsole").then((aToolbox) => {
++    toolboxFirstTab = aToolbox;
++  });
++  
+   is(gProfilerConnections, 1,
+     "A shared profiler connection should have been created.");
+ 
+   yield gDevTools.showToolbox(firstTarget, "jsprofiler");
+   is(gProfilerConnections, 1,
+     "No new profiler connections should have been created.");
+ 
+   let secondTab = yield addTab(SIMPLE_URL);
+   let secondTarget = TargetFactory.forTab(secondTab);
+   yield secondTarget.makeRemote();
+ 
+-  yield gDevTools.showToolbox(secondTarget, "jsprofiler");
++  let toolboxSecondTab;
++  yield gDevTools.showToolbox(secondTarget, "jsprofiler").then((aToolbox) => {
++    toolboxSecondTab = aToolbox;
++  });
++  
+   is(gProfilerConnections, 2,
+     "Only one new profiler connection should have been created.");
+ 
+-  yield removeTab(firstTab);
+-  yield removeTab(secondTab);
+-
+-  finish();
++  yield toolboxFirstTab.destroy().then(() => {
++    removeTab(firstTab);
++  });
++  yield toolboxSecondTab.destroy().then(() => {
++    removeTab(secondTab);
++    finish();
++  });
+ });
+ 
+ function profilerConnectionObserver(subject, topic, data) {
+   is(topic, "profiler-connection-created", "The correct topic was observed.");
+   gProfilerConnections++;
+ }
+ 
+ registerCleanupFunction(() => {
 diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
 --- a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
 +++ b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
@@ -521,7 +578,7 @@ diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
 --- a/dom/base/nsGlobalWindow.cpp
 +++ b/dom/base/nsGlobalWindow.cpp
-@@ -580,17 +580,17 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWind
+@@ -578,17 +578,17 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWind
    mMayHaveMouseEnterLeaveEventListener(false),
    mMayHavePointerEnterLeaveEventListener(false),
    mIsModalContentWindow(false),
@@ -572,7 +629,7 @@ diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
    float GetAudioGlobalVolumeInternal(float aVolume);
    void RefreshMediaElements();
  
-@@ -838,16 +850,20 @@ protected:
+@@ -798,16 +810,20 @@ protected:
    // this window.
    uint64_t mWindowID;
  
