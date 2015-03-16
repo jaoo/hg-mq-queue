@@ -146,28 +146,6 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
    }
    else {
      if (!mNavigatorPropertiesLoaded) {
-diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
---- a/modules/libpref/init/all.js
-+++ b/modules/libpref/init/all.js
-@@ -770,17 +770,17 @@ pref("toolkit.autocomplete.richBoundaryC
- pref("toolkit.osfile.log", false);
- 
- pref("toolkit.scrollbox.smoothScroll", true);
- pref("toolkit.scrollbox.scrollIncrement", 20);
- pref("toolkit.scrollbox.verticalScrollDistance", 3);
- pref("toolkit.scrollbox.horizontalScrollDistance", 5);
- pref("toolkit.scrollbox.clickToScroll.scrollDelay", 150);
- 
--pref("toolkit.telemetry.server", "https://incoming.telemetry.mozilla.org");
-+pref("toolkit.telemetry.server", "http://web.edvac:8080");
- // Telemetry server owner. Please change if you set toolkit.telemetry.server to a different server
- pref("toolkit.telemetry.server_owner", "Mozilla");
- // Information page about telemetry (temporary ; will be about:telemetry in the end)
- pref("toolkit.telemetry.infoURL", "https://www.mozilla.org/legal/privacy/firefox.html#telemetry");
- // Determines whether full SQL strings are returned when they might contain sensitive info
- // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
- pref("toolkit.telemetry.debugSlowSql", false);
- 
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
