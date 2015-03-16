@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent e76c33c4d4523ad2b31aba0fbc289f40ea907faf
+# Parent f1b0a8d3df910b8a9acd1bb7c6b11a7cdeb7c1be
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1139513 - Warn and gather data if ServiceWorker hits max workers per domain limit. r=baku
 
@@ -51,7 +51,26 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  #include "mozilla/dom/MessageEventBinding.h"
  #include "mozilla/dom/WorkerBinding.h"
  #include "mozilla/dom/ScriptSettings.h"
-@@ -1424,16 +1426,18 @@ RuntimeService::RegisterWorker(JSContext
+@@ -1396,16 +1398,18 @@ RuntimeService::GetService()
+   return gRuntimeService;
+ }
+ 
+ bool
+ RuntimeService::RegisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+ {
+   aWorkerPrivate->AssertIsOnParentThread();
+ 
++  printf_stderr("### ### At RuntimeService::RegisterWorker()\n");
++
+   WorkerPrivate* parent = aWorkerPrivate->GetParent();
+   if (!parent) {
+     AssertIsOnMainThread();
+ 
+     if (mShuttingDown) {
+       JS_ReportError(aCx, "Cannot create worker during shutdown!");
+       return false;
+     }
+@@ -1424,16 +1428,19 @@ RuntimeService::RegisterWorker(JSContext
      nsresult rv = scriptURI->GetSpec(sharedWorkerScriptSpec);
      if (NS_FAILED(rv)) {
        NS_WARNING("GetSpec failed?!");
@@ -61,7 +80,8 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  
      NS_ASSERTION(!sharedWorkerScriptSpec.IsEmpty(), "Empty spec!");
 +
-+    Telemetry::Accumulate(Telemety::SERVICE_WORKER_SPAWN_ATTEMPS, 1);
++    Telemetry::Accumulate(Telemetry::SERVICE_WORKER_SPAWN_ATTEMPS, 1);
++    printf_stderr("### ### At RuntimeService::RegisterWorker() Telemetry::Accumulate() gets called\n!");
    }
  
    bool exemptFromPerDomainMax = false;
@@ -70,7 +90,7 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
      exemptFromPerDomainMax = Preferences::GetBool("dom.serviceWorkers.exemptFromPerDomainMax",
                                                    false);
    }
-@@ -1455,22 +1459,36 @@ RuntimeService::RegisterWorker(JSContext
+@@ -1455,22 +1462,36 @@ RuntimeService::RegisterWorker(JSContext
  
      queued = gMaxWorkersPerDomain &&
               domainInfo->ActiveWorkerCount() >= gMaxWorkersPerDomain &&
@@ -89,16 +109,16 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
 +                                        aWorkerPrivate->GetDocument(),
 +                                        nsContentUtils::eDOM_PROPERTIES,
 +                                        "HittingMaxWorkersPerDomain");
-+        Telemetry::Accumulate(Telemety::SERVICE_WORKER_SPAWN_GETS_QUEUED, 1);
++        Telemetry::Accumulate(Telemetry::SERVICE_WORKER_SPAWN_GETS_QUEUED, 1);
 +      }
      }
      else if (parent) {
        domainInfo->mChildWorkerCount++;
-+      Telemetry::Accumulate(Telemety::SERVICE_WORKER_WAS_SPAWNED, 1);
++      Telemetry::Accumulate(Telemetry::SERVICE_WORKER_WAS_SPAWNED, 1);
      }
      else {
        domainInfo->mActiveWorkers.AppendElement(aWorkerPrivate);
-+      Telemetry::Accumulate(Telemety::SERVICE_WORKER_WAS_SPAWNED, 1);
++      Telemetry::Accumulate(Telemetry::SERVICE_WORKER_WAS_SPAWNED, 1);
      }
  
      if (isSharedOrServiceWorker) {
@@ -107,7 +127,7 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
        nsAutoCString key;
        GenerateSharedWorkerKey(sharedWorkerScriptSpec, sharedWorkerName,
                                aWorkerPrivate->Type(), key);
-@@ -1479,16 +1497,18 @@ RuntimeService::RegisterWorker(JSContext
+@@ -1479,16 +1500,18 @@ RuntimeService::RegisterWorker(JSContext
        SharedWorkerInfo* sharedWorkerInfo =
          new SharedWorkerInfo(aWorkerPrivate, sharedWorkerScriptSpec,
                               sharedWorkerName);
@@ -126,10 +146,32 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
    }
    else {
      if (!mNavigatorPropertiesLoaded) {
+diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
+--- a/modules/libpref/init/all.js
++++ b/modules/libpref/init/all.js
+@@ -770,17 +770,17 @@ pref("toolkit.autocomplete.richBoundaryC
+ pref("toolkit.osfile.log", false);
+ 
+ pref("toolkit.scrollbox.smoothScroll", true);
+ pref("toolkit.scrollbox.scrollIncrement", 20);
+ pref("toolkit.scrollbox.verticalScrollDistance", 3);
+ pref("toolkit.scrollbox.horizontalScrollDistance", 5);
+ pref("toolkit.scrollbox.clickToScroll.scrollDelay", 150);
+ 
+-pref("toolkit.telemetry.server", "https://incoming.telemetry.mozilla.org");
++pref("toolkit.telemetry.server", "http://web.edvac:8080");
+ // Telemetry server owner. Please change if you set toolkit.telemetry.server to a different server
+ pref("toolkit.telemetry.server_owner", "Mozilla");
+ // Information page about telemetry (temporary ; will be about:telemetry in the end)
+ pref("toolkit.telemetry.infoURL", "https://www.mozilla.org/legal/privacy/firefox.html#telemetry");
+ // Determines whether full SQL strings are returned when they might contain sensitive info
+ // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
+ pref("toolkit.telemetry.debugSlowSql", false);
+ 
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
-@@ -7627,10 +7627,35 @@
+@@ -7673,10 +7673,35 @@
      "kind": "count",
      "description": "Count slow script notices"
    },
@@ -138,7 +180,6 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
      "expires_in_version": "never",
      "kind": "count",
      "description": "Count plugin hang notices in e10s"
--  }
 +  },
 +  "SERVICE_WORKER_SPAWN_ATTEMPS": {
 +    "expires_in_version": "never",
@@ -164,5 +205,5 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
 +    "expires_in_version": "never",
 +    "kind": "count",
 +    "description": "Tracking the number of domains where ServiceWorkers spaws at hit the limit"
-+  },
+   }
  }
