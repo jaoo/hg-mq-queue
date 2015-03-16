@@ -1,12 +1,12 @@
 # HG changeset patch
-# Parent b6184f34860c0bf8c3876bc2a7c48dad822b7a66
+# Parent f1b0a8d3df910b8a9acd1bb7c6b11a7cdeb7c1be
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1003991 - Disable https:// only load for ServiceWorkers when Developer Tools are open. r=nsm
 
 diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
 --- a/browser/app/profile/firefox.js
 +++ b/browser/app/profile/firefox.js
-@@ -1470,16 +1470,19 @@ pref("devtools.performance.ui.flatten-tr
+@@ -1446,16 +1446,19 @@ pref("devtools.performance.ui.flatten-tr
  pref("devtools.performance.ui.show-platform-data", false);
  pref("devtools.performance.ui.show-idle-blocks", true);
  pref("devtools.performance.ui.enable-memory", false);
@@ -26,30 +26,6 @@ diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
  pref("devtools.netmonitor.panes-network-details-height", 450);
  pref("devtools.netmonitor.statistics", true);
  pref("devtools.netmonitor.filters", "[\"all\"]");
-diff --git a/browser/devtools/framework/gDevTools.jsm b/browser/devtools/framework/gDevTools.jsm
---- a/browser/devtools/framework/gDevTools.jsm
-+++ b/browser/devtools/framework/gDevTools.jsm
-@@ -67,16 +67,20 @@ DevTools.prototype = {
-   set testing(state) {
-     this._testing = state;
- 
-     if (state) {
-       // dom.send_after_paint_to_content is set to true (non-default) in
-       // testing/profiles/prefs_general.js so lets set it to the same as it is
-       // in a default browser profile for the duration of the test.
-       Services.prefs.setBoolPref("dom.send_after_paint_to_content", false);
-+      // dom.serviceWorkers.enabled is set to false (default) in
-+      // testing/profiles/prefs_general.js so lets set it to true for the
-+      // duration of the test.      
-+      Services.prefs.setBoolPref("dom.serviceWorkers.enabled", true);
-     }
-   },
- 
-   /**
-    * Register a new developer tool.
-    *
-    * A definition is a light object that holds different information about a
-    * developer tool. This object is not supposed to have any operational code.
 diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/framework/test/browser.ini
 --- a/browser/devtools/framework/test/browser.ini
 +++ b/browser/devtools/framework/test/browser.ini
@@ -107,7 +83,7 @@ new file mode 100644
 +
 +      h1 {
 +        font-size: 20px
-+      }      
++      }
 +    </style>
 +    <script type="application/javascript;version=1.8">
 +      function log(msg) {
@@ -118,7 +94,7 @@ new file mode 100644
 +
 +      navigator.serviceWorker.register("worker.js").then(
 +        swr => {
-+          var msg = "";    
++          var msg = "";
 +          var button = document.getElementById("button");
 +          if (swr.installing) {
 +            msg += "Installing worker/";
@@ -154,7 +130,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 new file mode 100644
 --- /dev/null
 +++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,122 @@
 +/* Any copyright is dedicated to the Public Domain.
 + * http://creativecommons.org/publicdomain/zero/1.0/ */
 +
@@ -170,6 +146,14 @@ new file mode 100644
 +let doc;
 +
 +function test() {
++  SpecialPowers.pushPrefEnv({"set": [
++    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++    ["dom.serviceWorkers.enabled", true],
++    ["dom.serviceWorkers.testing.enabled", false]
++  ]}, start);
++}
++
++function start() {
 +  gBrowser.selectedTab = gBrowser.addTab();
 +  let target = TargetFactory.forTab(gBrowser.selectedTab);
 +
@@ -324,7 +308,7 @@ diff --git a/browser/devtools/framework/toolbox-options.xul b/browser/devtools/f
 diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/toolbox.js
 --- a/browser/devtools/framework/toolbox.js
 +++ b/browser/devtools/framework/toolbox.js
-@@ -311,16 +311,17 @@ Toolbox.prototype = {
+@@ -327,16 +327,17 @@ Toolbox.prototype = {
  
          let framesMenu = this.doc.getElementById("command-button-frames");
          framesMenu.addEventListener("command", this.selectFrame, true);
@@ -342,26 +326,7 @@ diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/
          } else {
            this._addZoomKeys();
            this._loadInitialZoom();
-@@ -354,17 +355,17 @@ Toolbox.prototype = {
-             deferred.resolve();
-           }, deferred.reject);
-         });
-       };
- 
-       // Load the toolbox-level actor fronts and utilities now
-       this._target.makeRemote().then(() => {
-         iframe.setAttribute("src", this._URL);
--        iframe.setAttribute("aria-label", toolboxStrings("toolbox.label"))
-+        iframe.setAttribute("aria-label", toolboxStrings("toolbox.label"));
-         let domHelper = new DOMHelpers(iframe.contentWindow);
-         domHelper.onceDOMReady(domReady);
-       });
- 
-       return deferred.promise;
-     }).then(null, console.error.bind(console));
-   },
- 
-@@ -376,18 +377,23 @@ Toolbox.prototype = {
+@@ -402,18 +403,23 @@ Toolbox.prototype = {
     * @param  {Object} data
     *         {
     *           newValue: The new value
@@ -386,7 +351,7 @@ diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/
      key.addEventListener("command", () => {
        this.selectTool("options");
      }, true);
-@@ -717,16 +723,32 @@ Toolbox.prototype = {
+@@ -743,16 +749,32 @@ Toolbox.prototype = {
      let cacheDisabled = Services.prefs.getBoolPref(pref);
  
      if (this.target.activeTab) {
@@ -419,7 +384,7 @@ diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/
        this._pickerButton.setAttribute("checked", "true");
      } else {
        this._pickerButton.removeAttribute("checked");
-@@ -1628,20 +1650,23 @@ Toolbox.prototype = {
+@@ -1689,20 +1711,23 @@ Toolbox.prototype = {
  
          outstanding.push(panel.destroy());
        } catch (e) {
@@ -463,7 +428,7 @@ diff --git a/browser/devtools/profiler/test/browser_profiler_shared-connection-0
 +  yield gDevTools.showToolbox(firstTarget, "webconsole").then((aToolbox) => {
 +    toolboxFirstTab = aToolbox;
 +  });
-+  
++
    is(gProfilerConnections, 1,
      "A shared profiler connection should have been created.");
  
@@ -480,7 +445,7 @@ diff --git a/browser/devtools/profiler/test/browser_profiler_shared-connection-0
 +  yield gDevTools.showToolbox(secondTarget, "jsprofiler").then((aToolbox) => {
 +    toolboxSecondTab = aToolbox;
 +  });
-+  
++
    is(gProfilerConnections, 2,
      "Only one new profiler connection should have been created.");
  
@@ -532,7 +497,7 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
 diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 --- a/dom/base/nsDOMWindowUtils.cpp
 +++ b/dom/base/nsDOMWindowUtils.cpp
-@@ -3919,16 +3919,42 @@ nsDOMWindowUtils::GetFramesReflowed(uint
+@@ -3992,16 +3992,42 @@ nsDOMWindowUtils::GetFramesReflowed(uint
    if (!presContext) {
      return NS_ERROR_NOT_AVAILABLE;
    }
@@ -578,13 +543,13 @@ diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
 --- a/dom/base/nsGlobalWindow.cpp
 +++ b/dom/base/nsGlobalWindow.cpp
-@@ -578,17 +578,17 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWind
-   mMayHaveMouseEnterLeaveEventListener(false),
+@@ -579,17 +579,17 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWind
    mMayHavePointerEnterLeaveEventListener(false),
    mIsModalContentWindow(false),
    mIsActive(false), mIsBackground(false),
    mAudioMuted(false), mAudioVolume(1.0),
-   mInnerWindow(nullptr), mOuterWindow(aOuterWindow),
+   mDesktopModeViewport(false), mInnerWindow(nullptr),
+   mOuterWindow(aOuterWindow),
    // Make sure no actual window ends up with mWindowID == 0
    mWindowID(NextWindowID()), mHasNotifiedGlobalCreated(false),
 -  mMarkedCCGeneration(0)
@@ -600,7 +565,7 @@ diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
 diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
 --- a/dom/base/nsPIDOMWindow.h
 +++ b/dom/base/nsPIDOMWindow.h
-@@ -173,16 +173,28 @@ public:
+@@ -184,16 +184,28 @@ public:
    bool GetAudioMuted() const;
    void SetAudioMuted(bool aMuted);
  
@@ -629,7 +594,7 @@ diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
    float GetAudioGlobalVolumeInternal(float aVolume);
    void RefreshMediaElements();
  
-@@ -798,16 +810,20 @@ protected:
+@@ -812,16 +824,20 @@ protected:
    // this window.
    uint64_t mWindowID;
  
@@ -662,7 +627,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
  interface nsIJSRAIIHelper;
  interface nsIContentPermissionRequest;
  
--[scriptable, uuid(6eaf87a1-b252-4c4e-a2fc-318120680335)]
+-[scriptable, uuid(b39cb73f-ff99-4744-9780-2c26f830c6f7)]
 +[scriptable, uuid(7f2f44ab-2857-4cc2-8c9d-3d9816f5a4d6)]
  interface nsIDOMWindowUtils : nsISupports {
  
@@ -672,7 +637,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
     * to the given value. That is, when set to kDontAnimMode, all images
     * will stop animating. The attribute's value must be one of the
     * animationMode values from imgIContainer.
-@@ -1736,16 +1736,21 @@ interface nsIDOMWindowUtils : nsISupport
+@@ -1758,16 +1758,21 @@ interface nsIDOMWindowUtils : nsISupport
     * Controls the amount of chrome that should be visible on each side of
     * the window. Works like the chromemargin xul:window attribute.
     * This should only be used with non-XUL windows.
@@ -709,7 +674,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +  nsCOMPtr<nsPIDOMWindow> outerWindow = window->GetOuterWindow();
 +  bool serviceWorkersTestingEnabled =
 +    outerWindow->GetServiceWorkersTestingEnabled();
-+  
++
    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
    if (!doc) {
      return NS_ERROR_FAILURE;
@@ -730,43 +695,6 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      nsAutoCString scheme;
      rv = documentURI->GetScheme(scheme);
      if (NS_WARN_IF(NS_FAILED(rv))) {
-diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
---- a/modules/libpref/init/all.js
-+++ b/modules/libpref/init/all.js
-@@ -133,16 +133,19 @@ pref("dom.workers.maxPerDomain", 20);
- pref("dom.workers.sharedWorkers.enabled", true);
- 
- // WebSocket in workers are disabled by default.
- pref("dom.workers.websocket.enabled", true);
- 
- // Service workers
- pref("dom.serviceWorkers.enabled", false);
- 
-+// Service workers testing
-+pref("dom.serviceWorkers.testing.enabled", false);
-+
- // Whether nonzero values can be returned from performance.timing.*
- pref("dom.enable_performance", true);
- 
- // Whether resource timing will be gathered and returned by performance.GetEntries*
- pref("dom.enable_resource_timing", true);
- 
- // Enable high-resolution timing markers for users
- pref("dom.enable_user_timing", true);
-diff --git a/testing/profiles/prefs_general.js b/testing/profiles/prefs_general.js
---- a/testing/profiles/prefs_general.js
-+++ b/testing/profiles/prefs_general.js
-@@ -298,8 +298,10 @@ user_pref("media.decoder.heuristic.dorma
- #endif
- 
- // Don't prompt about e10s
- user_pref("browser.displayedE10SPrompt.1", 5);
- // Don't use auto-enabled e10s
- user_pref("browser.tabs.remote.autostart.1", false);
- // Don't forceably kill content processes after a timeout
- user_pref("dom.ipc.tabs.shutdownTimeoutSecs", 0);
-+
-+user_pref("dom.serviceWorkers.enabled", false);
 diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/server/actors/webbrowser.js
 --- a/toolkit/devtools/server/actors/webbrowser.js
 +++ b/toolkit/devtools/server/actors/webbrowser.js
@@ -870,7 +798,7 @@ diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/ser
 +                                 .getInterface(Ci.nsIDOMWindowUtils);
 +    return windowUtils.serviceWorkersTestingEnabled;
 +  },
-+  
++
 +  /**
     * Prepare to enter a nested event loop by disabling debuggee events.
     */

@@ -1,12 +1,12 @@
 # HG changeset patch
-# Parent e6f472fd16c990a8aebadfc90439fcaeaa67c72d
+# Parent 1edd79de45cf638403f94c164489636c5f47e770
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm
 
 diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
 --- a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
 +++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
-@@ -58,16 +58,67 @@ function testRegisterInstallingWorker() 
+@@ -66,16 +66,67 @@ function testRegisterInstallingWorker() 
      let output = doc.getElementById("output");
      let button = doc.getElementById("button");
  
@@ -74,7 +74,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
      }
  
      button.addEventListener('click', function onClick() {
-@@ -100,15 +151,30 @@ function toggleServiceWorkersTestingChec
+@@ -108,15 +159,30 @@ function toggleServiceWorkersTestingChec
    cbx.click();
  
    let mm = getFrameScript();
@@ -152,7 +152,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
                             ServiceWorkerRegistrationInfo* aRegistration,
                             ServiceWorkerUpdateFinishCallback* aCallback)
      : ServiceWorkerJob(aQueue)
-@@ -501,18 +504,25 @@ public:
+@@ -501,18 +504,24 @@ public:
        swm->AppendPendingOperation(runnable);
        return;
      }
@@ -162,8 +162,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
        if (mRegistration) {
 +        bool alwaysUpdate = false;
-+        if (mAlwaysUpdate ||
-+	    Preferences::GetBool("dom.serviceWorkers.testing.enabled")) {
++        if (mAlwaysUpdate) {
 +          alwaysUpdate = true;
 +        }
 +
@@ -179,7 +178,30 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
          }
        } else {
          mRegistration = swm->CreateNewRegistration(mScope, mPrincipal);
-@@ -936,17 +946,22 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -831,20 +840,20 @@ ServiceWorkerManager::Register(nsIDOMWin
+ 
+   nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+   if (!doc) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   nsCOMPtr<nsIURI> documentURI = doc->GetBaseURI();
+ 
+-  bool authenticatedOrigin = false;
++  bool testingEnabled = false, authenticatedOrigin = false;
+   if (Preferences::GetBool("dom.serviceWorkers.testing.enabled") ||
+       serviceWorkersTestingEnabled) {
+-    authenticatedOrigin = true;
++    authenticatedOrigin = testingEnabled = true;
+   }
+ 
+   nsresult rv;
+   if (!authenticatedOrigin) {
+     nsAutoCString scheme;
+     rv = documentURI->GetScheme(scheme);
+     if (NS_WARN_IF(NS_FAILED(rv))) {
+       return rv;
+@@ -936,17 +945,22 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    ServiceWorkerJobQueue* queue = GetOrCreateJobQueue(cleanedScope);
    MOZ_ASSERT(queue);
@@ -194,7 +216,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +                                 spec,
 +                                 cb,
 +                                 documentPrincipal,
-+                                 serviceWorkersTestingEnabled);
++                                 testingEnabled);
    queue->Append(job);
  
    promise.forget(aPromise);
