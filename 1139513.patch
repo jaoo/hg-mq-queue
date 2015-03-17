@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 62470763550ad760f2dd2fee4df9e53da8dbf2f9
+# Parent 32249d9b40563787a5dbab64849c887d724c038b
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1139513 - Warn and gather data if ServiceWorker hits max workers per domain limit. r=baku
 
@@ -51,17 +51,13 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  #include "mozilla/dom/MessageEventBinding.h"
  #include "mozilla/dom/WorkerBinding.h"
  #include "mozilla/dom/ScriptSettings.h"
-@@ -1411,18 +1413,22 @@ RuntimeService::RegisterWorker(JSContext
-     }
-   }
+@@ -1414,16 +1416,18 @@ RuntimeService::RegisterWorker(JSContext
  
    nsCString sharedWorkerScriptSpec;
  
    bool isSharedOrServiceWorker = aWorkerPrivate->IsSharedWorker() ||
                                   aWorkerPrivate->IsServiceWorker();
    if (isSharedOrServiceWorker) {
-+    printf_stderr("### ### At RuntimeService::RegisterWorker() is shared or service worker\n");
-+
      AssertIsOnMainThread();
  
 +    Telemetry::Accumulate(Telemetry::SERVICE_WORKER_SPAWN_ATTEMPS, 1);
@@ -74,7 +70,21 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
        NS_WARNING("GetSpec failed?!");
        xpc::Throw(aCx, rv);
        return false;
-@@ -1455,22 +1461,40 @@ RuntimeService::RegisterWorker(JSContext
+@@ -1446,32 +1450,58 @@ RuntimeService::RegisterWorker(JSContext
+   {
+     MutexAutoLock lock(mMutex);
+ 
+     if (!mDomainMap.Get(domain, &domainInfo)) {
+       NS_ASSERTION(!parent, "Shouldn't have a parent here!");
+ 
+       domainInfo = new WorkerDomainInfo();
+       domainInfo->mDomain = domain;
++      if (isSharedOrServiceWorker && !domainInfo->mDomainTracked) {
++        Telemetry::Accumulate(Telemetry::DOMAIN_WITH_SERVICE_WORKERS, 1);        
++        domainInfo->mDomainTracked = true;
++      }
+       mDomainMap.Put(domain, domainInfo);
+     }
  
      queued = gMaxWorkersPerDomain &&
               domainInfo->ActiveWorkerCount() >= gMaxWorkersPerDomain &&
@@ -94,6 +104,10 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
 +                                        nsContentUtils::eDOM_PROPERTIES,
 +                                        "HittingMaxWorkersPerDomain");
 +        Telemetry::Accumulate(Telemetry::SERVICE_WORKER_SPAWN_GETS_QUEUED, 1);
++        if (!domainInfo->mDomainHitMaxWorkersLimitTracked) {
++          Telemetry::Accumulate(Telemetry::DOMAIN_HITS_SERVICE_WORKERS_LIMIT, 1);
++          domainInfo->mDomainHitMaxWorkersLimitTracked = true;
++        }
 +      }
      }
      else if (parent) {
@@ -115,7 +129,7 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
        nsAutoCString key;
        GenerateSharedWorkerKey(sharedWorkerScriptSpec, sharedWorkerName,
                                aWorkerPrivate->Type(), key);
-@@ -1479,16 +1503,18 @@ RuntimeService::RegisterWorker(JSContext
+@@ -1480,16 +1510,18 @@ RuntimeService::RegisterWorker(JSContext
        SharedWorkerInfo* sharedWorkerInfo =
          new SharedWorkerInfo(aWorkerPrivate, sharedWorkerScriptSpec,
                               sharedWorkerName);
@@ -134,6 +148,33 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
    }
    else {
      if (!mNavigatorPropertiesLoaded) {
+diff --git a/dom/workers/RuntimeService.h b/dom/workers/RuntimeService.h
+--- a/dom/workers/RuntimeService.h
++++ b/dom/workers/RuntimeService.h
+@@ -42,19 +42,22 @@ class RuntimeService MOZ_FINAL : public 
+ 
+   struct WorkerDomainInfo
+   {
+     nsCString mDomain;
+     nsTArray<WorkerPrivate*> mActiveWorkers;
+     nsTArray<WorkerPrivate*> mQueuedWorkers;
+     nsClassHashtable<nsCStringHashKey, SharedWorkerInfo> mSharedWorkerInfos;
+     uint32_t mChildWorkerCount;
++    bool mDomainTracked;
++    bool mDomainHitMaxWorkersLimitTracked;
+ 
+     WorkerDomainInfo()
+-    : mActiveWorkers(1), mChildWorkerCount(0)
++      : mActiveWorkers(1), mChildWorkerCount(0),
++        mDomainTracked(false), mDomainHitMaxWorkersLimitTracked(false)
+     { }
+ 
+     uint32_t
+     ActiveWorkerCount() const
+     {
+       return mActiveWorkers.Length() + mChildWorkerCount;
+     }
+   };
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
@@ -162,14 +203,14 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
 +    "kind": "count",
 +    "description": "Tracking whether a ServiceWorker spawn gets queued due to hitting max workers per domain limit"
 +  },
-+  "DOMAIN_SERVICE_WORKERS_SPAWN_AT": {
++  "DOMAIN_WITH_SERVICE_WORKERS": {
 +    "expires_in_version": "never",
 +    "kind": "count",
-+    "description": "Tracking the number of domains where ServiceWorkers spawn at"
++    "description": "Tracking the number of domains where service workers are registered"
 +  },
-+  "DOMAIN_SERVICE_WORKERS_HIT_LIMIT_AT": {
++  "DOMAIN_HITS_SERVICE_WORKERS_LIMIT": {
 +    "expires_in_version": "never",
 +    "kind": "count",
-+    "description": "Tracking the number of domains where ServiceWorkers spaws at hit the limit"
++    "description": "Tracking the number of domains where the number of service workers hits the limit"
    }
  }
