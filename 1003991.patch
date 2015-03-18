@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent f1b0a8d3df910b8a9acd1bb7c6b11a7cdeb7c1be
+# Parent 8ead00a44649cf577e76e74d7003648a3782062c
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1003991 - Disable https:// only load for ServiceWorkers when Developer Tools are open. r=nsm
 
@@ -497,7 +497,7 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
 diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 --- a/dom/base/nsDOMWindowUtils.cpp
 +++ b/dom/base/nsDOMWindowUtils.cpp
-@@ -3992,16 +3992,42 @@ nsDOMWindowUtils::GetFramesReflowed(uint
+@@ -3989,16 +3989,42 @@ nsDOMWindowUtils::GetFramesReflowed(uint
    if (!presContext) {
      return NS_ERROR_NOT_AVAILABLE;
    }
@@ -627,7 +627,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
  interface nsIJSRAIIHelper;
  interface nsIContentPermissionRequest;
  
--[scriptable, uuid(b39cb73f-ff99-4744-9780-2c26f830c6f7)]
+-[scriptable, uuid(dde97573-f4cf-45ce-bbb0-5af4e5f77440)]
 +[scriptable, uuid(7f2f44ab-2857-4cc2-8c9d-3d9816f5a4d6)]
  interface nsIDOMWindowUtils : nsISupports {
  
@@ -637,7 +637,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
     * to the given value. That is, when set to kDontAnimMode, all images
     * will stop animating. The attribute's value must be one of the
     * animationMode values from imgIContainer.
-@@ -1758,16 +1758,21 @@ interface nsIDOMWindowUtils : nsISupport
+@@ -1757,16 +1757,21 @@ interface nsIDOMWindowUtils : nsISupport
     * Controls the amount of chrome that should be visible on each side of
     * the window. Works like the chromemargin xul:window attribute.
     * This should only be used with non-XUL windows.
@@ -662,7 +662,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -820,26 +820,30 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -871,26 +871,30 @@ ServiceWorkerManager::Register(nsIDOMWin
    AssertIsOnMainThread();
  
    // XXXnsm Don't allow chrome callers for now, we don't support chrome

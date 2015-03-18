@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 1edd79de45cf638403f94c164489636c5f47e770
+# Parent 6cfd27461f5bac13c97b6600fc5f8fa4f59fdfb2
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm
 
@@ -62,7 +62,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 +
 +    function doTheCheck() {
 +      info("Testing it registers correctly and there are three worker: an " +
-+           " installing, a wating and active worker");
++           " installing, a waiting and active worker");
 +      is(output.textContent,
 +         "Installing worker/Waiting worker/Active worker/",
 +         "Installing, waiting and active worker expected");
@@ -108,7 +108,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -447,16 +447,17 @@ class ServiceWorkerRegisterJob MOZ_FINAL
+@@ -479,16 +479,17 @@ class ServiceWorkerRegisterJob MOZ_FINAL
  {
    friend class ContinueInstallTask;
  
@@ -126,7 +126,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
    {
      REGISTER_JOB = 0,
      UPDATE_JOB = 1,
-@@ -465,22 +466,24 @@ class ServiceWorkerRegisterJob MOZ_FINAL
+@@ -497,22 +498,24 @@ class ServiceWorkerRegisterJob MOZ_FINAL
  public:
    NS_DECL_ISUPPORTS
  
@@ -152,7 +152,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
                             ServiceWorkerRegistrationInfo* aRegistration,
                             ServiceWorkerUpdateFinishCallback* aCallback)
      : ServiceWorkerJob(aQueue)
-@@ -501,18 +504,24 @@ public:
+@@ -533,18 +536,24 @@ public:
        swm->AppendPendingOperation(runnable);
        return;
      }
@@ -178,7 +178,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
          }
        } else {
          mRegistration = swm->CreateNewRegistration(mScope, mPrincipal);
-@@ -831,20 +840,20 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -882,20 +891,20 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
    if (!doc) {
@@ -201,7 +201,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      rv = documentURI->GetScheme(scheme);
      if (NS_WARN_IF(NS_FAILED(rv))) {
        return rv;
-@@ -936,17 +945,22 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -975,17 +984,22 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    ServiceWorkerJobQueue* queue = GetOrCreateJobQueue(cleanedScope);
    MOZ_ASSERT(queue);
