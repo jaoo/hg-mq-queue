@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 32249d9b40563787a5dbab64849c887d724c038b
+# Parent 6cf2a639d0b3781dc49142905c8fdd3234a2b6ab
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1139513 - Warn and gather data if ServiceWorker hits max workers per domain limit. r=baku
 
@@ -51,26 +51,30 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  #include "mozilla/dom/MessageEventBinding.h"
  #include "mozilla/dom/WorkerBinding.h"
  #include "mozilla/dom/ScriptSettings.h"
-@@ -1414,16 +1416,18 @@ RuntimeService::RegisterWorker(JSContext
+@@ -1409,16 +1411,22 @@ RuntimeService::RegisterWorker(JSContext
+     if (mShuttingDown) {
+       JS_ReportError(aCx, "Cannot create worker during shutdown!");
+       return false;
+     }
+   }
  
    nsCString sharedWorkerScriptSpec;
  
++  bool isServiceWorker = aWorkerPrivate->IsServiceWorker();
++  if (isServiceWorker) {
++    AssertIsOnMainThread();
++    Telemetry::Accumulate(Telemetry::SERVICE_WORKER_SPAWN_ATTEMPTS, 1);
++  }
++
    bool isSharedOrServiceWorker = aWorkerPrivate->IsSharedWorker() ||
                                   aWorkerPrivate->IsServiceWorker();
    if (isSharedOrServiceWorker) {
      AssertIsOnMainThread();
  
-+    Telemetry::Accumulate(Telemetry::SERVICE_WORKER_SPAWN_ATTEMPS, 1);
-+
      nsCOMPtr<nsIURI> scriptURI = aWorkerPrivate->GetResolvedScriptURI();
      NS_ASSERTION(scriptURI, "Null script URI!");
  
-     nsresult rv = scriptURI->GetSpec(sharedWorkerScriptSpec);
-     if (NS_FAILED(rv)) {
-       NS_WARNING("GetSpec failed?!");
-       xpc::Throw(aCx, rv);
-       return false;
-@@ -1446,32 +1450,58 @@ RuntimeService::RegisterWorker(JSContext
+@@ -1446,26 +1454,48 @@ RuntimeService::RegisterWorker(JSContext
    {
      MutexAutoLock lock(mMutex);
  
@@ -79,8 +83,9 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  
        domainInfo = new WorkerDomainInfo();
        domainInfo->mDomain = domain;
-+      if (isSharedOrServiceWorker && !domainInfo->mDomainTracked) {
-+        Telemetry::Accumulate(Telemetry::DOMAIN_WITH_SERVICE_WORKERS, 1);        
++      if (isServiceWorker && !domainInfo->mDomainTracked) {
++        AssertIsOnMainThread();
++        Telemetry::Accumulate(Telemetry::DOMAIN_WITH_SERVICE_WORKERS, 1);
 +        domainInfo->mDomainTracked = true;
 +      }
        mDomainMap.Put(domain, domainInfo);
@@ -93,7 +98,8 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  
      if (queued) {
        domainInfo->mQueuedWorkers.AppendElement(aWorkerPrivate);
-+      if (isSharedOrServiceWorker) {
++      if (isServiceWorker) {
++        AssertIsOnMainThread();
 +        // ServiceWorker spawn gets queued due to hitting max workers per domain
 +        // limit so let's log a warning.
 +        // Note: aWorkerPrivate->GetDocument() call might result nullptr due to
@@ -112,42 +118,32 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
      }
      else if (parent) {
        domainInfo->mChildWorkerCount++;
-+      if (isSharedOrServiceWorker) {
-+        Telemetry::Accumulate(Telemetry::SERVICE_WORKER_WAS_SPAWNED, 1);
-+      }
      }
      else {
        domainInfo->mActiveWorkers.AppendElement(aWorkerPrivate);
-+      if (isSharedOrServiceWorker) {
-+        Telemetry::Accumulate(Telemetry::SERVICE_WORKER_WAS_SPAWNED, 1);
-+      }
      }
  
-     if (isSharedOrServiceWorker) {
-       const nsCString& sharedWorkerName = aWorkerPrivate->SharedWorkerName();
- 
-       nsAutoCString key;
-       GenerateSharedWorkerKey(sharedWorkerScriptSpec, sharedWorkerName,
-                               aWorkerPrivate->Type(), key);
-@@ -1480,16 +1510,18 @@ RuntimeService::RegisterWorker(JSContext
-       SharedWorkerInfo* sharedWorkerInfo =
-         new SharedWorkerInfo(aWorkerPrivate, sharedWorkerScriptSpec,
-                              sharedWorkerName);
-       domainInfo->mSharedWorkerInfos.Put(key, sharedWorkerInfo);
+@@ -1524,16 +1554,20 @@ RuntimeService::RegisterWorker(JSContext
+       MOZ_ASSERT(aWorkerPrivate->IsSharedWorker());
      }
    }
  
-   // From here on out we must call UnregisterWorker if something fails!
-+  // TODO: Should we decrease the counters of service workers spawns if the
-+  // worker ends up unregistered?
-   if (parent) {
-     if (!parent->AddChildWorker(aCx, aWorkerPrivate)) {
-       UnregisterWorker(aCx, aWorkerPrivate);
-       return false;
-     }
+   if (!queued && !ScheduleWorker(aCx, aWorkerPrivate)) {
+     return false;
    }
-   else {
-     if (!mNavigatorPropertiesLoaded) {
+ 
++  if (isServiceWorker) {
++    AssertIsOnMainThread();
++    Telemetry::Accumulate(Telemetry::SERVICE_WORKER_WAS_SPAWNED, 1);
++  }
+   return true;
+ }
+ 
+ void
+ RuntimeService::UnregisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+ {
+   aWorkerPrivate->AssertIsOnParentThread();
+ 
 diff --git a/dom/workers/RuntimeService.h b/dom/workers/RuntimeService.h
 --- a/dom/workers/RuntimeService.h
 +++ b/dom/workers/RuntimeService.h
@@ -188,15 +184,15 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
      "kind": "count",
      "description": "Count plugin hang notices in e10s"
 +  },
-+  "SERVICE_WORKER_SPAWN_ATTEMPS": {
++  "SERVICE_WORKER_SPAWN_ATTEMPTS": {
 +    "expires_in_version": "never",
 +    "kind": "count",
-+    "description": "Tracking ServiceWorker spawn attemps"
++    "description": "Count attempts to spawn a ServiceWorker for a domain"
 +  },
 +  "SERVICE_WORKER_WAS_SPAWNED": {
 +    "expires_in_version": "never",
 +    "kind": "count",
-+    "description": "Tracking whether a ServiceWorker was really spawned"
++    "description": "Count ServiceWorkers that really did get a thread created for them"
 +  },
 +  "SERVICE_WORKER_SPAWN_GETS_QUEUED": {
 +    "expires_in_version": "never",
