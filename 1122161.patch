@@ -1,0 +1,5 @@
+# HG changeset patch
+# Parent 6cf2a639d0b3781dc49142905c8fdd3234a2b6ab
+# User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
+Bug 1122161 - Redirected channels should respect skip service worker flag. r=nsm
+
