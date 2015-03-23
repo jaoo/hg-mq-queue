@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 8ead00a44649cf577e76e74d7003648a3782062c
+# Parent d111d64d9f0f186e9dd8eeaa327c1a209e8c6e18
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1003991 - Disable https:// only load for ServiceWorkers when Developer Tools are open. r=nsm
 
@@ -471,7 +471,7 @@ diff --git a/browser/devtools/profiler/test/browser_profiler_shared-connection-0
 diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
 --- a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
 +++ b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
-@@ -88,16 +88,22 @@
+@@ -92,16 +92,22 @@
  <!ENTITY options.disableJavaScript.tooltip   "Turning this option on will disable JavaScript for the current tab. If the tab or the toolbox is closed then this setting will be forgotten.">
  
  <!-- LOCALIZATION NOTE (options.disableCache.label2,
@@ -497,7 +497,7 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
 diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 --- a/dom/base/nsDOMWindowUtils.cpp
 +++ b/dom/base/nsDOMWindowUtils.cpp
-@@ -3989,16 +3989,42 @@ nsDOMWindowUtils::GetFramesReflowed(uint
+@@ -3976,16 +3976,42 @@ nsDOMWindowUtils::GetFramesReflowed(uint
    if (!presContext) {
      return NS_ERROR_NOT_AVAILABLE;
    }
@@ -565,7 +565,7 @@ diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
 diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
 --- a/dom/base/nsPIDOMWindow.h
 +++ b/dom/base/nsPIDOMWindow.h
-@@ -184,16 +184,28 @@ public:
+@@ -181,16 +181,28 @@ public:
    bool GetAudioMuted() const;
    void SetAudioMuted(bool aMuted);
  
@@ -594,7 +594,7 @@ diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
    float GetAudioGlobalVolumeInternal(float aVolume);
    void RefreshMediaElements();
  
-@@ -812,16 +824,20 @@ protected:
+@@ -793,16 +805,20 @@ protected:
    // this window.
    uint64_t mWindowID;
  
@@ -627,7 +627,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
  interface nsIJSRAIIHelper;
  interface nsIContentPermissionRequest;
  
--[scriptable, uuid(dde97573-f4cf-45ce-bbb0-5af4e5f77440)]
+-[scriptable, uuid(400db885-c2b8-4bf1-bc12-1dadcb08ad12)]
 +[scriptable, uuid(7f2f44ab-2857-4cc2-8c9d-3d9816f5a4d6)]
  interface nsIDOMWindowUtils : nsISupports {
  
@@ -637,7 +637,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
     * to the given value. That is, when set to kDontAnimMode, all images
     * will stop animating. The attribute's value must be one of the
     * animationMode values from imgIContainer.
-@@ -1757,16 +1757,21 @@ interface nsIDOMWindowUtils : nsISupport
+@@ -1752,16 +1752,21 @@ interface nsIDOMWindowUtils : nsISupport
     * Controls the amount of chrome that should be visible on each side of
     * the window. Works like the chromemargin xul:window attribute.
     * This should only be used with non-XUL windows.

@@ -1,12 +1,116 @@
 # HG changeset patch
-# Parent 6cfd27461f5bac13c97b6600fc5f8fa4f59fdfb2
+# Parent 5cc44bb5b6025df70913a180912fe7369c810261
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm
 
-diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
+diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
+--- a/browser/app/profile/firefox.js
++++ b/browser/app/profile/firefox.js
+@@ -1449,16 +1449,19 @@ pref("devtools.performance.ui.enable-mem
+ pref("devtools.performance.ui.enable-framerate", true);
+ 
+ // The default cache UI setting
+ pref("devtools.cache.disabled", false);
+ 
+ // The default service workers UI setting
+ pref("devtools.serviceWorkers.testing.enabled", false);
+ 
++// Force update service worker on registration flag.
++pref("devtools.serviceWorkers.forceUpdateOnRegistration", false);
++
+ // Enable the Network Monitor
+ pref("devtools.netmonitor.enabled", true);
+ 
+ // The default Network Monitor UI settings
+ pref("devtools.netmonitor.panes-network-details-width", 550);
+ pref("devtools.netmonitor.panes-network-details-height", 450);
+ pref("devtools.netmonitor.statistics", true);
+ pref("devtools.netmonitor.filters", "[\"all\"]");
+diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/framework/test/browser.ini
+--- a/browser/devtools/framework/test/browser.ini
++++ b/browser/devtools/framework/test/browser.ini
+@@ -3,17 +3,17 @@ subsuite = devtools
+ support-files =
+   browser_toolbox_options_disable_js.html
+   browser_toolbox_options_disable_js_iframe.html
+   browser_toolbox_options_disable_cache.sjs
+   browser_toolbox_sidebar_tool.xul
+   head.js
+   helper_disable_cache.js
+   doc_theme.css
+-  browser_toolbox_options_enable_serviceworkers_testing.html
++  browser_toolbox_options_serviceworkers.html
+   worker.js
+ 
+ [browser_devtools_api.js]
+ [browser_devtools_api_destroy.js]
+ [browser_dynamic_tool_enabling.js]
+ [browser_keybindings.js]
+ [browser_new_activation_workflow.js]
+ [browser_target_events.js]
+@@ -48,14 +48,14 @@ skip-if = e10s # Bug 1069044 - destroyIn
+ [browser_toolbox_transport_events.js]
+ [browser_toolbox_window_reload_target.js]
+ [browser_toolbox_window_shortcuts.js]
+ skip-if = os == "mac" && os_version == "10.8" || os == "win" && os_version == "5.1" # Bug 851129 - Re-enable browser_toolbox_window_shortcuts.js test after leaks are fixed
+ [browser_toolbox_window_title_changes.js]
+ [browser_toolbox_zoom.js]
+ [browser_toolbox_custom_host.js]
+ [browser_toolbox_theme_registration.js]
+-[browser_toolbox_options_enable_serviceworkers_testing.js]
++[browser_toolbox_options_serviceworkers.js]
+ skip-if = e10s # Bug 1030318
+ 
+ # We want this test to run for mochitest-dt as well, so we include it here:
+ [../../../base/content/test/general/browser_parsable_css.js]
+ 
+diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html b/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.html
+rename from browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
+rename to browser/devtools/framework/test/browser_toolbox_options_serviceworkers.html
+diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js b/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.js
+rename from browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
+rename to browser/devtools/framework/test/browser_toolbox_options_serviceworkers.js
 --- a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
-+++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
-@@ -66,16 +66,67 @@ function testRegisterInstallingWorker() 
++++ b/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.js
+@@ -1,18 +1,23 @@
+ /* Any copyright is dedicated to the Public Domain.
+  * http://creativecommons.org/publicdomain/zero/1.0/ */
+ 
+-// Test that enabling Service Workers testing option enables the
+-// mServiceWorkersTestingEnabled attribute added to nsPIDOMWindow.
++// It tests that enabling Service Workers testing option enables the
++// mServiceWorkersTestingEnabled attribute added to nsPIDOMWindow. It also
++// tests that toggling on the force service worker update on registration
++// checkbox the service worker is always updated on registration.
+ 
+ const TEST_URI = URL_ROOT +
+-                 "browser_toolbox_options_enable_serviceworkers_testing.html";
++                 "browser_toolbox_options_serviceworkers.html";
+ 
+-const ELEMENT_ID = "devtools-enable-serviceWorkersTesting";
++const TESTING_ELEMENT_ID =
++  "devtools-enable-serviceWorkersTesting";
++const FORCEUPDATE_ELEMENT_ID =
++  "devtools-serviceWorkers-forceUpdateOnRegistration";
+ 
+ let toolbox;
+ let doc;
+ 
+ function test() {
+   SpecialPowers.pushPrefEnv({"set": [
+     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+     ["dom.serviceWorkers.enabled", true],
+@@ -57,66 +62,134 @@ function testRegisterFails() {
+ 
+   button.addEventListener('click', function onClick() {
+     button.addEventListener('click', onClick);
+     doTheCheck();
+   });
+ }
+ 
+ function testRegisterInstallingWorker() {
+-  toggleServiceWorkersTestingCheckbox().then(() => {
++  toggleCheckbox(TESTING_ELEMENT_ID).then(() => {
      let output = doc.getElementById("output");
      let button = doc.getElementById("button");
  
@@ -15,23 +119,25 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
        is(output.textContent,
           "Installing worker/",
           "Installing worker expected");
+-      toggleServiceWorkersTestingCheckbox().then(finishUp);
 +      testRegisterActiveWorker();
-+    }
-+
-+    if (output.textContent !== "No output") {
-+      doTheCheck();
-+    }
-+
-+    button.addEventListener('click', function onClick() {
-+      button.addEventListener('click', onClick);
-+      doTheCheck();
-+    });
-+  });
-+}
-+
+     }
+ 
+     if (output.textContent !== "No output") {
+       doTheCheck();
+     }
+ 
+     button.addEventListener('click', function onClick() {
+       button.addEventListener('click', onClick);
+       doTheCheck();
+     });
+   });
+ }
+ 
+-function toggleServiceWorkersTestingCheckbox() {
 +
 +function testRegisterActiveWorker() {
-+  reload().then(() => {
++  toggleCheckbox(FORCEUPDATE_ELEMENT_ID).then(() => {
 +    let output = doc.getElementById("output");
 +    let button = doc.getElementById("button");
 +
@@ -66,15 +172,45 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 +      is(output.textContent,
 +         "Installing worker/Waiting worker/Active worker/",
 +         "Installing, waiting and active worker expected");
-       toggleServiceWorkersTestingCheckbox().then(finishUp);
-     }
++      toggleCheckbox(FORCEUPDATE_ELEMENT_ID).then(() => {
++        toggleCheckbox(TESTING_ELEMENT_ID).then(finishUp);
++      });
++    }
++
++    if (output.textContent !== "No output") {
++      doTheCheck();
++    }
++
++    button.addEventListener('click', function onClick() {
++      button.addEventListener('click', onClick);
++      doTheCheck();
++    });
++  });
++}
++
++function toggleCheckbox(elementId) {
+   let deferred = promise.defer();
  
-     if (output.textContent !== "No output") {
-       doTheCheck();
-     }
+   let panel = toolbox.getCurrentPanel();
+-  let cbx = panel.panelDoc.getElementById(ELEMENT_ID);
++  let cbx = panel.panelDoc.getElementById(elementId);
  
-     button.addEventListener('click', function onClick() {
-@@ -108,15 +159,30 @@ function toggleServiceWorkersTestingChec
+   cbx.scrollIntoView();
+ 
+   if (cbx.checked) {
+-    info("Clearing checkbox to disable service workers testing");
++    info("Clearing " + elementId + " checkbox");
+   } else {
+-    info("Checking checkbox to enable service workers testing");
++    info("Checking " + elementId + " checkbox");
+   }
+ 
+   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
+     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
+     doc = content.document;
+     deferred.resolve();
+   }, true);
+ 
    cbx.click();
  
    let mm = getFrameScript();
@@ -105,6 +241,318 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
      finish();
    });
  }
+diff --git a/browser/devtools/framework/toolbox-options.xul b/browser/devtools/framework/toolbox-options.xul
+--- a/browser/devtools/framework/toolbox-options.xul
++++ b/browser/devtools/framework/toolbox-options.xul
+@@ -147,16 +147,20 @@
+                     data-pref="devtools.cache.disabled"/>
+           <checkbox id="devtools-disable-javascript"
+                     label="&options.disableJavaScript.label;"
+                     tooltiptext="&options.disableJavaScript.tooltip;"/>
+           <checkbox id="devtools-enable-serviceWorkersTesting"
+                     label="&options.enableServiceWorkersTesting.label;"
+                     tooltiptext="&options.enableServiceWorkersTesting.tooltip;"
+                     data-pref="devtools.serviceWorkers.testing.enabled"/>
++          <checkbox id="devtools-serviceWorkers-forceUpdateOnRegistration"
++                    label="&options.serviceWorkersForceUpdateOnRegistration.label;"
++                    tooltiptext="&options.serviceWorkersForceUpdateOnRegistration.tooltip;"
++                    data-pref="devtools.serviceWorkers.forceUpdateOnRegistration"/>
+           <hbox class="hidden-labels-box">
+             <checkbox label="&options.enableChrome.label5;"
+                       tooltiptext="&options.enableChrome.tooltip3;"
+                       data-pref="devtools.chrome.enabled"/>
+           </hbox>
+           <hbox class="hidden-labels-box">
+             <checkbox label="&options.enableRemote.label3;"
+                       tooltiptext="&options.enableRemote.tooltip;"
+diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/toolbox.js
+--- a/browser/devtools/framework/toolbox.js
++++ b/browser/devtools/framework/toolbox.js
+@@ -328,16 +328,17 @@ Toolbox.prototype = {
+         let framesMenu = this.doc.getElementById("command-button-frames");
+         framesMenu.addEventListener("command", this.selectFrame, true);
+ 
+         this._buildDockButtons();
+         this._buildOptions();
+         this._buildTabs();
+         this._applyCacheSettings();
+         this._applyServiceWorkersTestingSettings();
++        this._applyServiceWorkersForceUpdateOnRegistrationFlag();
+         this._addKeysToWindow();
+         this._addReloadKeys();
+         this._addHostListeners();
+         if (this._hostOptions && this._hostOptions.zoom === false) {
+           this._disableZoomKeys();
+         } else {
+           this._addZoomKeys();
+           this._loadInitialZoom();
+@@ -410,16 +411,19 @@ Toolbox.prototype = {
+   _prefChanged: function(event, data) {
+     switch(data.pref) {
+     case "devtools.cache.disabled":
+       this._applyCacheSettings();
+       break;
+     case "devtools.serviceWorkers.testing.enabled":
+       this._applyServiceWorkersTestingSettings();
+       break;
++    case "devtools.serviceWorkers.forceUpdateOnRegistration":
++      this._applyServiceWorkersForceUpdateOnRegistrationFlag();
++      break;
+     }
+   },
+ 
+   _buildOptions: function() {
+     let key = this.doc.getElementById("toolbox-options-key");
+     key.addEventListener("command", () => {
+       this.selectTool("options");
+     }, true);
+@@ -765,16 +769,33 @@ Toolbox.prototype = {
+     if (this.target.activeTab) {
+       this.target.activeTab.reconfigure({
+         "serviceWorkersTestingEnabled": serviceWorkersTestingEnabled
+       });
+     }
+   },
+ 
+   /**
++   * Apply the current force service worker update on registration flag from
++   * devtools.serviceWorkers.forceUpdateOnRegistration to this toolbox's tab.
++   */
++  _applyServiceWorkersForceUpdateOnRegistrationFlag: function() {
++    let pref = "devtools.serviceWorkers.forceUpdateOnRegistration";
++    let forceServiceWorkersUpdateOnRegistration =
++      Services.prefs.getBoolPref(pref) || false;
++
++    if (this.target.activeTab) {
++      this.target.activeTab.reconfigure({
++        "forceServiceWorkersUpdateOnRegistration":
++        forceServiceWorkersUpdateOnRegistration
++      });
++    }
++  },
++
++  /**
+    * Setter for the checked state of the picker button in the toolbar
+    * @param {Boolean} isChecked
+    */
+   set pickerButtonChecked(isChecked) {
+     if (isChecked) {
+       this._pickerButton.setAttribute("checked", "true");
+     } else {
+       this._pickerButton.removeAttribute("checked");
+@@ -1716,17 +1737,18 @@ Toolbox.prototype = {
+       }
+     }
+ 
+     // Now that we are closing the toolbox we can re-enable the cache settings
+     // and disable the service workers testing settings for the current tab.
+     if (this.target.activeTab) {
+       this.target.activeTab.reconfigure({
+         "cacheDisabled": false,
+-        "serviceWorkersTestingEnabled": false
++        "serviceWorkersTestingEnabled": false,
++        "forceServiceWorkersUpdateOnRegistration": false
+       });
+     }
+ 
+     // Destroying the walker and inspector fronts
+     outstanding.push(this.destroyInspector().then(() => {
+       // Removing buttons
+       if (this._pickerButton) {
+         this._pickerButton.removeEventListener("command", this._togglePicker, false);
+diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
+--- a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
++++ b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
+@@ -98,16 +98,22 @@
+ <!ENTITY options.disableCache.tooltip2   "Turning this option on will disable the cache for all tabs that have the toolbox open.">
+ 
+ <!-- LOCALIZATION NOTE (options.enableServiceWorkersTesting.label,
+   -  options.enableServiceWorkersTesting.tooltip): This is the options panel label and
+   -  tooltip for the checkbox that toggles the service workers testing features on or off. -->
+ <!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workes testing features (when toolbox is open)">
+ <!ENTITY options.enableServiceWorkersTesting.tooltip   "Turning this option on will enable the service workers testing features for all tabs that have the toolbox open.">
+ 
++<!-- LOCALIZATION NOTE (options.serviceWorkersForceUpdateOnRegistration.label,
++  -  options.serviceWorkersForceUpdateOnRegistration.tooltip): This is the options panel label and
++  -  tooltip for the checkbox that toggles on or off the force update on registration flag for service workers. -->
++<!ENTITY options.serviceWorkersForceUpdateOnRegistration.label     "Force service workers to be update on registration (when toolbox is open)">
++<!ENTITY options.serviceWorkersForceUpdateOnRegistration.tooltip   "Turning this option on will force the update of the service workers on registration for all tabs that have the toolbox open.">
++
+ <!-- LOCALIZATION NOTE (options.selectDefaultTools.label): This is the label for
+   -  the heading of group of checkboxes corresponding to the default developer
+   -  tools. -->
+ <!ENTITY options.selectDefaultTools.label     "Default Firefox Developer Tools">
+ 
+ <!-- LOCALIZATION NOTE (options.selectAdditionalTools.label): This is the label for
+   -  the heading of group of checkboxes corresponding to the developer tools
+   -  added by add-ons. This heading is hidden when there is no developer tool
+diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
+--- a/dom/base/nsDOMWindowUtils.cpp
++++ b/dom/base/nsDOMWindowUtils.cpp
+@@ -4002,16 +4002,42 @@ nsDOMWindowUtils::GetServiceWorkersTesti
+   nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
+   NS_ENSURE_STATE(window);
+ 
+   *aEnabled = window->GetServiceWorkersTestingEnabled();
+ 
+   return NS_OK;
+ }
+ 
++NS_IMETHODIMP
++nsDOMWindowUtils::SetForceServiceWorkerUpdateOnRegistration(bool aEnabled)
++{
++  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
++
++  nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
++  NS_ENSURE_STATE(window);
++
++  window->SetForceServiceWorkerUpdateOnRegistration(aEnabled);
++
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsDOMWindowUtils::GetForceServiceWorkerUpdateOnRegistration(bool *aEnabled)
++{
++  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
++
++  nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
++  NS_ENSURE_STATE(window);
++
++  *aEnabled = window->GetForceServiceWorkerUpdateOnRegistration();
++
++  return NS_OK;
++}
++
+ NS_INTERFACE_MAP_BEGIN(nsTranslationNodeList)
+   NS_INTERFACE_MAP_ENTRY(nsISupports)
+   NS_INTERFACE_MAP_ENTRY(nsITranslationNodeList)
+ NS_INTERFACE_MAP_END
+ 
+ NS_IMPL_ADDREF(nsTranslationNodeList)
+ NS_IMPL_RELEASE(nsTranslationNodeList)
+ 
+diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
+--- a/dom/base/nsGlobalWindow.cpp
++++ b/dom/base/nsGlobalWindow.cpp
+@@ -579,17 +579,18 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWind
+   mMayHavePointerEnterLeaveEventListener(false),
+   mIsModalContentWindow(false),
+   mIsActive(false), mIsBackground(false),
+   mAudioMuted(false), mAudioVolume(1.0),
+   mDesktopModeViewport(false), mInnerWindow(nullptr),
+   mOuterWindow(aOuterWindow),
+   // Make sure no actual window ends up with mWindowID == 0
+   mWindowID(NextWindowID()), mHasNotifiedGlobalCreated(false),
+-  mMarkedCCGeneration(0), mServiceWorkersTestingEnabled(false)
++  mMarkedCCGeneration(0), mServiceWorkersTestingEnabled(false),
++  mForceServiceWorkerUpdateOnRegistration(false)
+  {}
+ 
+ nsPIDOMWindow::~nsPIDOMWindow() {}
+ 
+ // DialogValueHolder CC goop.
+ NS_IMPL_CYCLE_COLLECTION(DialogValueHolder, mValue)
+ 
+ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DialogValueHolder)
+diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
+--- a/dom/base/nsPIDOMWindow.h
++++ b/dom/base/nsPIDOMWindow.h
+@@ -193,16 +193,28 @@ public:
+   }
+ 
+   bool GetServiceWorkersTestingEnabled()
+   {
+     MOZ_ASSERT(IsOuterWindow());
+     return mServiceWorkersTestingEnabled;
+   }
+ 
++  virtual void SetForceServiceWorkerUpdateOnRegistration(bool aEnabled)
++  {
++    MOZ_ASSERT(IsOuterWindow());
++    mForceServiceWorkerUpdateOnRegistration = aEnabled;
++  }
++
++  bool GetForceServiceWorkerUpdateOnRegistration()
++  {
++    MOZ_ASSERT(IsOuterWindow());
++    return mForceServiceWorkerUpdateOnRegistration;
++  }
++
+ protected:
+   // Lazily instantiate an about:blank document if necessary, and if
+   // we have what it takes to do so.
+   void MaybeCreateDoc();
+ 
+   float GetAudioGlobalVolumeInternal(float aVolume);
+   void RefreshMediaElements();
+ 
+@@ -809,16 +821,20 @@ protected:
+   // the (chrome|content)-document-global-created notification.
+   bool mHasNotifiedGlobalCreated;
+ 
+   uint32_t mMarkedCCGeneration;
+ 
+   // Let the service workers plumbing know that some feature are enabled while
+   // testing.
+   bool mServiceWorkersTestingEnabled;
++
++  // Flag that let the service workers plumbing know service workers will be
++  // always updated on registration.
++  bool mForceServiceWorkerUpdateOnRegistration;
+ };
+ 
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindow, NS_PIDOMWINDOW_IID)
+ 
+ #ifdef MOZILLA_INTERNAL_API
+ PopupControlState
+ PushPopupControlState(PopupControlState aState, bool aForce);
+diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsIDOMWindowUtils.idl
+--- a/dom/interfaces/base/nsIDOMWindowUtils.idl
++++ b/dom/interfaces/base/nsIDOMWindowUtils.idl
+@@ -45,17 +45,17 @@ interface nsIFile;
+ interface nsIDOMClientRect;
+ interface nsIURI;
+ interface nsIDOMEventTarget;
+ interface nsIRunnable;
+ interface nsITranslationNodeList;
+ interface nsIJSRAIIHelper;
+ interface nsIContentPermissionRequest;
+ 
+-[scriptable, uuid(7f2f44ab-2857-4cc2-8c9d-3d9816f5a4d6)]
++[scriptable, uuid(e97634c8-9abf-4a54-ac72-5c09ef130207)]
+ interface nsIDOMWindowUtils : nsISupports {
+ 
+   /**
+    * Image animation mode of the window. When this attribute's value
+    * is changed, the implementation should set all images in the window
+    * to the given value. That is, when set to kDontAnimMode, all images
+    * will stop animating. The attribute's value must be one of the
+    * animationMode values from imgIContainer.
+@@ -1757,16 +1757,22 @@ interface nsIDOMWindowUtils : nsISupport
+                        in int32_t aRight,
+                        in int32_t aBottom,
+                        in int32_t aLeft);
+ 
+   /**
+    * Enable some service workers testing features.
+    */
+   attribute boolean serviceWorkersTestingEnabled;
++
++  /**
++   * Flag that let the service workers plumbing know service workers will be
++   * always updated on registration.
++   */
++  attribute boolean forceServiceWorkerUpdateOnRegistration;
+ };
+ 
+ [scriptable, uuid(c694e359-7227-4392-a138-33c0cc1f15a6)]
+ interface nsITranslationNodeList : nsISupports {
+   readonly attribute unsigned long length;
+   nsIDOMNode item(in unsigned long index);
+ 
+   // A translation root is a block element, or an inline element
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
@@ -117,7 +565,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
    nsRefPtr<ServiceWorkerRegistrationInfo> mRegistration;
    nsRefPtr<ServiceWorkerUpdateFinishCallback> mCallback;
    nsCOMPtr<nsIPrincipal> mPrincipal;
-+  bool mAlwaysUpdate;
++  bool mForceUpdate;
  
    ~ServiceWorkerRegisterJob()
    { }
@@ -137,13 +585,13 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
                             ServiceWorkerUpdateFinishCallback* aCallback,
 -                           nsIPrincipal* aPrincipal)
 +                           nsIPrincipal* aPrincipal,
-+                           bool aAlwaysUpdate)
++                           bool aForceUpdate)
      : ServiceWorkerJob(aQueue)
      , mScope(aScope)
      , mScriptSpec(aScriptSpec)
      , mCallback(aCallback)
      , mPrincipal(aPrincipal)
-+    , mAlwaysUpdate(aAlwaysUpdate)
++    , mForceUpdate(aForceUpdate)
      , mJobType(REGISTER_JOB)
    { }
  
@@ -152,8 +600,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
                             ServiceWorkerRegistrationInfo* aRegistration,
                             ServiceWorkerUpdateFinishCallback* aCallback)
      : ServiceWorkerJob(aQueue)
-@@ -533,18 +536,24 @@ public:
-       swm->AppendPendingOperation(runnable);
+@@ -534,17 +537,18 @@ public:
        return;
      }
  
@@ -161,14 +608,9 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
        mRegistration = swm->GetRegistration(mScope);
  
        if (mRegistration) {
-+        bool alwaysUpdate = false;
-+        if (mAlwaysUpdate) {
-+          alwaysUpdate = true;
-+        }
-+
          nsRefPtr<ServiceWorkerInfo> newest = mRegistration->Newest();
 -        if (newest && mScriptSpec.Equals(newest->ScriptSpec()) &&
-+        if (!alwaysUpdate && newest &&
++        if (!mForceUpdate && newest &&
 +            mScriptSpec.Equals(newest->ScriptSpec()) &&
              mScriptSpec.Equals(mRegistration->mScriptSpec)) {
            mRegistration->mPendingUninstall = false;
@@ -178,8 +620,19 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
          }
        } else {
          mRegistration = swm->CreateNewRegistration(mScope, mPrincipal);
-@@ -882,20 +891,20 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -874,17 +878,19 @@ ServiceWorkerManager::Register(nsIDOMWin
+   // ServiceWorkers.
+   MOZ_ASSERT(!nsContentUtils::IsCallerChrome());
  
+   nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aWindow);
+ 
+   nsCOMPtr<nsPIDOMWindow> outerWindow = window->GetOuterWindow();
+   bool serviceWorkersTestingEnabled =
+     outerWindow->GetServiceWorkersTestingEnabled();
+-
++  bool forceServiceWorkerUpdateOnRegistration =
++    outerWindow->GetForceServiceWorkerUpdateOnRegistration();
++  
    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
    if (!doc) {
      return NS_ERROR_FAILURE;
@@ -187,21 +640,8 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
    nsCOMPtr<nsIURI> documentURI = doc->GetBaseURI();
  
--  bool authenticatedOrigin = false;
-+  bool testingEnabled = false, authenticatedOrigin = false;
-   if (Preferences::GetBool("dom.serviceWorkers.testing.enabled") ||
-       serviceWorkersTestingEnabled) {
--    authenticatedOrigin = true;
-+    authenticatedOrigin = testingEnabled = true;
-   }
- 
-   nsresult rv;
-   if (!authenticatedOrigin) {
-     nsAutoCString scheme;
-     rv = documentURI->GetScheme(scheme);
-     if (NS_WARN_IF(NS_FAILED(rv))) {
-       return rv;
-@@ -975,17 +984,22 @@ ServiceWorkerManager::Register(nsIDOMWin
+   bool authenticatedOrigin = false;
+@@ -975,17 +981,22 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    ServiceWorkerJobQueue* queue = GetOrCreateJobQueue(cleanedScope);
    MOZ_ASSERT(queue);
@@ -216,7 +656,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +                                 spec,
 +                                 cb,
 +                                 documentPrincipal,
-+                                 testingEnabled);
++                                 forceServiceWorkerUpdateOnRegistration);
    queue->Append(job);
  
    promise.forget(aPromise);
@@ -225,3 +665,93 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
  void
  ServiceWorkerManager::AppendPendingOperation(ServiceWorkerJobQueue* aQueue,
+diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/server/actors/webbrowser.js
+--- a/toolkit/devtools/server/actors/webbrowser.js
++++ b/toolkit/devtools/server/actors/webbrowser.js
+@@ -1247,16 +1247,23 @@ TabActor.prototype = {
+     }
+     if ((typeof options.serviceWorkersTestingEnabled !== "undefined") &&
+         (options.serviceWorkersTestingEnabled !==
+          this._getServiceWorkersTestingEnabled())) {
+       this._setServiceWorkersTestingEnabled(
+         options.serviceWorkersTestingEnabled
+       );
+     }
++    if ((typeof options.forceServiceWorkersUpdateOnRegistration !== "undefined") &&
++        (options.forceServiceWorkersUpdateOnRegistration !==
++         this._getForceServiceWorkersUpdateOnRegistration())) {
++      this._setForceServiceWorkersUpdateOnRegistration(
++        options.forceServiceWorkersUpdateOnRegistration
++      );
++    }
+ 
+     // Reload if:
+     //  - there's an explicit `performReload` flag and it's true
+     //  - there's no `performReload` flag, but it makes sense to do so
+     let hasExplicitReloadFlag = "performReload" in options;
+     if ((hasExplicitReloadFlag && options.performReload) ||
+        (!hasExplicitReloadFlag && reload)) {
+       this.onReload();
+@@ -1295,16 +1302,30 @@ TabActor.prototype = {
+     }
+ 
+     let windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
+                                  .getInterface(Ci.nsIDOMWindowUtils);
+     windowUtils.serviceWorkersTestingEnabled = enabled;
+   },
+ 
+   /**
++   *
++   */
++  _setForceServiceWorkersUpdateOnRegistration: function(enabled) {
++    if (!this.docShell) {
++      // The tab is already closed.
++      return null;
++    }
++
++    let windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
++                          .getInterface(Ci.nsIDOMWindowUtils);
++    windowUtils.forceServiceWorkerUpdateOnRegistration = enabled;
++  },
++
++  /**
+    * Return cache allowed status.
+    */
+   _getCacheDisabled: function() {
+     if (!this.docShell) {
+       // The tab is already closed.
+       return null;
+     }
+ 
+@@ -1335,16 +1356,31 @@ TabActor.prototype = {
+     }
+ 
+     let windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
+                                  .getInterface(Ci.nsIDOMWindowUtils);
+     return windowUtils.serviceWorkersTestingEnabled;
+   },
+ 
+   /**
++   *
++   */
++  _getForceServiceWorkersUpdateOnRegistration: function() {
++    if (!this.docShell) {
++      // The tab is already closed.
++      return null;
++    }
++
++    let windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
++          .getInterface(Ci.nsIDOMWindowUtils);
++    dump("windowUtils.forceServiceWorkerUpdateOnRegistration is " + windowUtils.forceServiceWorkerUpdateOnRegistration + "\n");
++    return windowUtils.forceServiceWorkerUpdateOnRegistration;
++  },
++
++  /**
+    * Prepare to enter a nested event loop by disabling debuggee events.
+    */
+   preNest: function BTA_preNest() {
+     if (!this.window) {
+       // The tab is already closed.
+       return;
+     }
+     let windowUtils = this.window
