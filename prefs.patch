@@ -66,6 +66,25 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
  pref("toolkit.telemetry.debugSlowSql", false);
  
+@@ -793,17 +793,17 @@ pref("toolkit.asyncshutdown.timeout.cras
+ 
+ // Enable deprecation warnings.
+ pref("devtools.errorconsole.deprecation_warnings", true);
+ 
+ // Disable debugging chrome
+ #ifdef MOZ_DEV_EDITION
+ pref("devtools.chrome.enabled", true);
+ #else
+-pref("devtools.chrome.enabled", false);
++pref("devtools.chrome.enabled", true);
+ #endif
+ 
+ // Disable remote debugging protocol logging
+ pref("devtools.debugger.log", false);
+ pref("devtools.debugger.log.verbose", false);
+ // Disable remote debugging connections
+ #ifdef MOZ_DEV_EDITION
+ pref("devtools.debugger.remote-enabled", true);
 @@ -4469,17 +4469,17 @@ pref("image.mozsamplesize.enabled", fals
  pref("beacon.enabled", true);
  #endif
