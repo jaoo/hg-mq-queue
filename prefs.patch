@@ -1,0 +1,87 @@
+# HG changeset patch
+# Parent 327a93e5cc397700118cfa20a184f17c9aeb3cbc
+# User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
+Bug XXXXXXX: Enable some prefs for testing. r=me
+
+diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
+--- a/browser/app/profile/firefox.js
++++ b/browser/app/profile/firefox.js
+@@ -1842,17 +1842,17 @@ pref("media.gmp-provider.enabled", true)
+ pref("browser.apps.URL", "https://marketplace.firefox.com/discovery/");
+ 
+ #ifdef NIGHTLY_BUILD
+ pref("browser.polaris.enabled", false);
+ pref("privacy.trackingprotection.ui.enabled", false);
+ #endif
+ 
+ #ifdef NIGHTLY_BUILD
+-pref("browser.tabs.remote.autostart.1", true);
++pref("browser.tabs.remote.autostart.1", false);
+ #endif
+ 
+ #ifdef NIGHTLY_BUILD
+ // Enable e10s add-on interposition by default.
+ pref("extensions.interposition.enabled", true);
+ pref("extensions.interposition.prefetching", true);
+ #endif
+ 
+diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
+--- a/modules/libpref/init/all.js
++++ b/modules/libpref/init/all.js
+@@ -131,17 +131,17 @@ pref("dom.workers.maxPerDomain", 20);
+ 
+ // Whether or not Shared Web Workers are enabled.
+ pref("dom.workers.sharedWorkers.enabled", true);
+ 
+ // WebSocket in workers are disabled by default.
+ pref("dom.workers.websocket.enabled", true);
+ 
+ // Service workers
+-pref("dom.serviceWorkers.enabled", false);
++pref("dom.serviceWorkers.enabled", true);
+ 
+ // Whether nonzero values can be returned from performance.timing.*
+ pref("dom.enable_performance", true);
+ 
+ // Whether resource timing will be gathered and returned by performance.GetEntries*
+ pref("dom.enable_resource_timing", true);
+ 
+ // Enable high-resolution timing markers for users
+@@ -770,17 +770,17 @@ pref("toolkit.autocomplete.richBoundaryC
+ pref("toolkit.osfile.log", false);
+ 
+ pref("toolkit.scrollbox.smoothScroll", true);
+ pref("toolkit.scrollbox.scrollIncrement", 20);
+ pref("toolkit.scrollbox.verticalScrollDistance", 3);
+ pref("toolkit.scrollbox.horizontalScrollDistance", 5);
+ pref("toolkit.scrollbox.clickToScroll.scrollDelay", 150);
+ 
+-pref("toolkit.telemetry.server", "https://incoming.telemetry.mozilla.org");
++pref("toolkit.telemetry.server", "http://web.edvac:8080");
+ // Telemetry server owner. Please change if you set toolkit.telemetry.server to a different server
+ pref("toolkit.telemetry.server_owner", "Mozilla");
+ // Information page about telemetry (temporary ; will be about:telemetry in the end)
+ pref("toolkit.telemetry.infoURL", "https://www.mozilla.org/legal/privacy/firefox.html#telemetry");
+ // Determines whether full SQL strings are returned when they might contain sensitive info
+ // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
+ pref("toolkit.telemetry.debugSlowSql", false);
+ 
+@@ -4469,17 +4469,17 @@ pref("image.mozsamplesize.enabled", fals
+ pref("beacon.enabled", true);
+ #endif
+ 
+ // Camera prefs
+ pref("camera.control.face_detection.enabled", true);
+ 
+ 
+ // SW Cache API
+-pref("dom.caches.enabled", false);
++pref("dom.caches.enabled", true);
+ 
+ #ifdef MOZ_WIDGET_GONK
+ // Empirically, this is the value returned by hal::GetTotalSystemMemory()
+ // when Flame's memory is limited to 512MiB. If the camera stack determines
+ // it is running on a low memory platform, features that can be reliably
+ // supported will be disabled. This threshold can be adjusted to suit other
+ // platforms; and set to 0 to disable the low-memory check altogether.
+ pref("camera.control.low_memory_thresholdMB", 404);
