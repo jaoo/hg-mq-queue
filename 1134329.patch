@@ -1,7 +1,7 @@
 # HG changeset patch
-# Parent 5cc44bb5b6025df70913a180912fe7369c810261
+# Parent e00fb9f4b47052c815f54800136313e97ab67a2a
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
-Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm
+Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm,miker
 
 diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
 --- a/browser/app/profile/firefox.js
@@ -40,7 +40,7 @@ diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/fram
    doc_theme.css
 -  browser_toolbox_options_enable_serviceworkers_testing.html
 +  browser_toolbox_options_serviceworkers.html
-   worker.js
+   serviceworker.js
  
  [browser_devtools_api.js]
  [browser_devtools_api_destroy.js]
@@ -76,9 +76,8 @@ rename to browser/devtools/framework/test/browser_toolbox_options_serviceworkers
  /* Any copyright is dedicated to the Public Domain.
   * http://creativecommons.org/publicdomain/zero/1.0/ */
  
--// Test that enabling Service Workers testing option enables the
+ // Test that enabling Service Workers testing option enables the
 -// mServiceWorkersTestingEnabled attribute added to nsPIDOMWindow.
-+// It tests that enabling Service Workers testing option enables the
 +// mServiceWorkersTestingEnabled attribute added to nsPIDOMWindow. It also
 +// tests that toggling on the force service worker update on registration
 +// checkbox the service worker is always updated on registration.
@@ -97,13 +96,13 @@ rename to browser/devtools/framework/test/browser_toolbox_options_serviceworkers
  let doc;
  
  function test() {
+   // Note: Pref dom.serviceWorkers.testing.enabled is false since we are testing
+   // the same capabilities are enabled with the devtool pref.
    SpecialPowers.pushPrefEnv({"set": [
-     ["dom.serviceWorkers.exemptFromPerDomainMax", true],
-     ["dom.serviceWorkers.enabled", true],
-@@ -57,66 +62,134 @@ function testRegisterFails() {
+@@ -59,66 +64,132 @@ function testRegisterFails() {
  
    button.addEventListener('click', function onClick() {
-     button.addEventListener('click', onClick);
+     button.removeEventListener('click', onClick);
      doTheCheck();
    });
  }
@@ -128,14 +127,13 @@ rename to browser/devtools/framework/test/browser_toolbox_options_serviceworkers
      }
  
      button.addEventListener('click', function onClick() {
-       button.addEventListener('click', onClick);
+       button.removeEventListener('click', onClick);
        doTheCheck();
      });
    });
  }
  
 -function toggleServiceWorkersTestingCheckbox() {
-+
 +function testRegisterActiveWorker() {
 +  toggleCheckbox(FORCEUPDATE_ELEMENT_ID).then(() => {
 +    let output = doc.getElementById("output");
@@ -153,7 +151,6 @@ rename to browser/devtools/framework/test/browser_toolbox_options_serviceworkers
 +    if (output.textContent !== "No output") {
 +      doTheCheck();
 +    }
-+
 +    button.addEventListener('click', function onClick() {
 +      button.addEventListener('click', onClick);
 +      doTheCheck();
@@ -369,7 +366,7 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
  <!-- LOCALIZATION NOTE (options.enableServiceWorkersTesting.label,
    -  options.enableServiceWorkersTesting.tooltip): This is the options panel label and
    -  tooltip for the checkbox that toggles the service workers testing features on or off. -->
- <!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workes testing features (when toolbox is open)">
+ <!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workers testing features (when toolbox is open)">
  <!ENTITY options.enableServiceWorkersTesting.tooltip   "Turning this option on will enable the service workers testing features for all tabs that have the toolbox open.">
  
 +<!-- LOCALIZATION NOTE (options.serviceWorkersForceUpdateOnRegistration.label,
@@ -556,7 +553,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -479,16 +479,17 @@ class ServiceWorkerRegisterJob MOZ_FINAL
+@@ -488,16 +488,17 @@ class ServiceWorkerRegisterJob final : p
  {
    friend class ContinueInstallTask;
  
@@ -574,7 +571,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
    {
      REGISTER_JOB = 0,
      UPDATE_JOB = 1,
-@@ -497,22 +498,24 @@ class ServiceWorkerRegisterJob MOZ_FINAL
+@@ -506,22 +507,24 @@ class ServiceWorkerRegisterJob final : p
  public:
    NS_DECL_ISUPPORTS
  
@@ -600,7 +597,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
                             ServiceWorkerRegistrationInfo* aRegistration,
                             ServiceWorkerUpdateFinishCallback* aCallback)
      : ServiceWorkerJob(aQueue)
-@@ -534,17 +537,18 @@ public:
+@@ -543,17 +546,18 @@ public:
        return;
      }
  
@@ -620,7 +617,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
          }
        } else {
          mRegistration = swm->CreateNewRegistration(mScope, mPrincipal);
-@@ -874,17 +878,19 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -883,16 +887,18 @@ ServiceWorkerManager::Register(nsIDOMWin
    // ServiceWorkers.
    MOZ_ASSERT(!nsContentUtils::IsCallerChrome());
  
@@ -629,10 +626,9 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
    nsCOMPtr<nsPIDOMWindow> outerWindow = window->GetOuterWindow();
    bool serviceWorkersTestingEnabled =
      outerWindow->GetServiceWorkersTestingEnabled();
--
 +  bool forceServiceWorkerUpdateOnRegistration =
 +    outerWindow->GetForceServiceWorkerUpdateOnRegistration();
-+  
+ 
    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
    if (!doc) {
      return NS_ERROR_FAILURE;
@@ -640,8 +636,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
    nsCOMPtr<nsIURI> documentURI = doc->GetBaseURI();
  
-   bool authenticatedOrigin = false;
-@@ -975,17 +981,22 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -984,17 +990,22 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    ServiceWorkerJobQueue* queue = GetOrCreateJobQueue(cleanedScope);
    MOZ_ASSERT(queue);
@@ -692,7 +687,7 @@ diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/ser
      if ((hasExplicitReloadFlag && options.performReload) ||
         (!hasExplicitReloadFlag && reload)) {
        this.onReload();
-@@ -1295,16 +1302,30 @@ TabActor.prototype = {
+@@ -1295,16 +1302,31 @@ TabActor.prototype = {
      }
  
      let windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -701,7 +696,8 @@ diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/ser
    },
  
    /**
-+   *
++   * Disable or enable to force always the update of service workers on
++   * registration.
 +   */
 +  _setForceServiceWorkersUpdateOnRegistration: function(enabled) {
 +    if (!this.docShell) {
@@ -723,7 +719,7 @@ diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/ser
        return null;
      }
  
-@@ -1335,16 +1356,31 @@ TabActor.prototype = {
+@@ -1335,16 +1357,31 @@ TabActor.prototype = {
      }
  
      let windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -732,7 +728,8 @@ diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/ser
    },
  
    /**
-+   *
++   * Return whether service workers are being force to always update on
++   * registration.
 +   */
 +  _getForceServiceWorkersUpdateOnRegistration: function() {
 +    if (!this.docShell) {
@@ -742,7 +739,6 @@ diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/ser
 +
 +    let windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
 +          .getInterface(Ci.nsIDOMWindowUtils);
-+    dump("windowUtils.forceServiceWorkerUpdateOnRegistration is " + windowUtils.forceServiceWorkerUpdateOnRegistration + "\n");
 +    return windowUtils.forceServiceWorkerUpdateOnRegistration;
 +  },
 +

@@ -1,7 +1,7 @@
 # HG changeset patch
-# Parent d111d64d9f0f186e9dd8eeaa327c1a209e8c6e18
+# Parent 6229a2b58212102344fc13881703d3cae17e9490
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
-Bug 1003991 - Disable https:// only load for ServiceWorkers when Developer Tools are open. r=nsm
+Bug 1003991 - Disable https:// only load for ServiceWorkers when Developer Tools are open. r=nsm,miker
 
 diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
 --- a/browser/app/profile/firefox.js
@@ -39,7 +39,7 @@ diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/fram
    helper_disable_cache.js
    doc_theme.css
 +  browser_toolbox_options_enable_serviceworkers_testing.html
-+  worker.js
++  serviceworker.js
  
  [browser_devtools_api.js]
  [browser_devtools_api_destroy.js]
@@ -92,7 +92,7 @@ new file mode 100644
 +        output.innerHTML = msg;
 +      }
 +
-+      navigator.serviceWorker.register("worker.js").then(
++      navigator.serviceWorker.register("serviceworker.js").then(
 +        swr => {
 +          var msg = "";
 +          var button = document.getElementById("button");
@@ -112,8 +112,8 @@ new file mode 100644
 +          if (error.name === "SecurityError") {
 +            var button = document.getElementById("button");
 +            log("SecurityError");
-+            button.click();
 +          }
++          button.click();
 +      });
 +    </script>
 +  </head>
@@ -130,7 +130,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 new file mode 100644
 --- /dev/null
 +++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,124 @@
 +/* Any copyright is dedicated to the Public Domain.
 + * http://creativecommons.org/publicdomain/zero/1.0/ */
 +
@@ -146,6 +146,8 @@ new file mode 100644
 +let doc;
 +
 +function test() {
++  // Note: Pref dom.serviceWorkers.testing.enabled is false since we are testing
++  // the same capabilities are enabled with the devtool pref.
 +  SpecialPowers.pushPrefEnv({"set": [
 +    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
 +    ["dom.serviceWorkers.enabled", true],
@@ -189,7 +191,7 @@ new file mode 100644
 +  }
 +
 +  button.addEventListener('click', function onClick() {
-+    button.addEventListener('click', onClick);
++    button.removeEventListener('click', onClick);
 +    doTheCheck();
 +  });
 +}
@@ -212,7 +214,7 @@ new file mode 100644
 +    }
 +
 +    button.addEventListener('click', function onClick() {
-+      button.addEventListener('click', onClick);
++      button.removeEventListener('click', onClick);
 +      doTheCheck();
 +    });
 +  });
@@ -253,12 +255,12 @@ new file mode 100644
 +    finish();
 +  });
 +}
-diff --git a/browser/devtools/framework/test/worker.js b/browser/devtools/framework/test/worker.js
+diff --git a/browser/devtools/framework/test/serviceworker.js b/browser/devtools/framework/test/serviceworker.js
 new file mode 100644
 --- /dev/null
-+++ b/browser/devtools/framework/test/worker.js
++++ b/browser/devtools/framework/test/serviceworker.js
 @@ -0,0 +1,1 @@
-+// empty worker, always succeed!
++// empty service worker, always succeed!
 diff --git a/browser/devtools/framework/toolbox-options.js b/browser/devtools/framework/toolbox-options.js
 --- a/browser/devtools/framework/toolbox-options.js
 +++ b/browser/devtools/framework/toolbox-options.js
@@ -483,7 +485,7 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
 +<!-- LOCALIZATION NOTE (options.enableServiceWorkersTesting.label,
 +  -  options.enableServiceWorkersTesting.tooltip): This is the options panel label and
 +  -  tooltip for the checkbox that toggles the service workers testing features on or off. -->
-+<!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workes testing features (when toolbox is open)">
++<!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workers testing features (when toolbox is open)">
 +<!ENTITY options.enableServiceWorkersTesting.tooltip   "Turning this option on will enable the service workers testing features for all tabs that have the toolbox open.">
 +
  <!-- LOCALIZATION NOTE (options.selectDefaultTools.label): This is the label for
@@ -662,7 +664,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -871,26 +871,30 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -880,26 +880,30 @@ ServiceWorkerManager::Register(nsIDOMWin
    AssertIsOnMainThread();
  
    // XXXnsm Don't allow chrome callers for now, we don't support chrome
