@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 327a93e5cc397700118cfa20a184f17c9aeb3cbc
+# Parent 781dfcee977fa5536bcf46aa72872fe1d3e2977b
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1139513 - Warn and gather data if ServiceWorker hits max workers per domain limit. r=nsm
 
@@ -125,6 +125,33 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  {
    aWorkerPrivate->AssertIsOnParentThread();
  
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -2370,21 +2370,23 @@ ServiceWorkerManager::IsControlled(nsIDo
+ }
+ 
+ nsresult
+ ServiceWorkerManager::GetDocumentRegistration(nsIDocument* aDoc,
+                                               ServiceWorkerRegistrationInfo** aRegistrationInfo)
+ {
+   nsRefPtr<ServiceWorkerRegistrationInfo> registration;
+   if (!mControlledDocuments.Get(aDoc, getter_AddRefs(registration))) {
++    printf_stderr("### ### At ServiceWorkerManager::GetDocumentRegistration() !mControlledDocuments.Get(aDoc, getter_AddRefs(registration))\n");
+     return NS_ERROR_NOT_AVAILABLE;
+   }
+ 
+   // If the document is controlled, the current worker MUST be non-null.
+   if (!registration->mActiveWorker) {
++    printf_stderr("### ### At ServiceWorkerManager::GetDocumentRegistration() !registration->mActiveWorker\n");
+     return NS_ERROR_NOT_AVAILABLE;
+   }
+ 
+   registration.forget(aRegistrationInfo);
+   return NS_OK;
+ }
+ 
+ /*
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
