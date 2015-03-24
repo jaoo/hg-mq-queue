@@ -1,5 +1,23 @@
 # HG changeset patch
-# Parent 6cf2a639d0b3781dc49142905c8fdd3234a2b6ab
+# Parent 6229a2b58212102344fc13881703d3cae17e9490
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1122161 - Redirected channels should respect skip service worker flag. r=nsm
 
+diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
+--- a/dom/workers/test/serviceworkers/mochitest.ini
++++ b/dom/workers/test/serviceworkers/mochitest.ini
+@@ -63,8 +63,10 @@ support-files =
+ [test_post_message.html]
+ [test_post_message_advanced.html]
+ [test_post_message_source.html]
+ [test_match_all_client_properties.html]
+ [test_close.html]
+ [test_serviceworker_interfaces.html]
+ [test_serviceworker_not_sharedworker.html]
+ [test_match_all_client_id.html]
++[test_redirect_intercepted.html]
++[test_respect_skip_flag.html]
+diff --git a/dom/workers/test/serviceworkers/test_redirect_intercepted.html b/dom/workers/test/serviceworkers/test_redirect_intercepted.html
+new file mode 100644
+diff --git a/dom/workers/test/serviceworkers/test_respect_skip_flag.html b/dom/workers/test/serviceworkers/test_respect_skip_flag.html
+new file mode 100644
