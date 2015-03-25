@@ -1,12 +1,12 @@
 # HG changeset patch
-# Parent 781dfcee977fa5536bcf46aa72872fe1d3e2977b
+# Parent 7e1f549793005a18d8f71345b1e293d6e8c8d78a
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1139513 - Warn and gather data if ServiceWorker hits max workers per domain limit. r=nsm
 
 diff --git a/dom/locales/en-US/chrome/dom/dom.properties b/dom/locales/en-US/chrome/dom/dom.properties
 --- a/dom/locales/en-US/chrome/dom/dom.properties
 +++ b/dom/locales/en-US/chrome/dom/dom.properties
-@@ -156,8 +156,9 @@ DataContainerEventWarning=Use of DataCon
+@@ -156,8 +156,10 @@ DataContainerEventWarning=Use of DataCon
  # LOCALIZATION NOTE: Do not translate "window.controllers"
  Window_ControllersWarning=window.controllers is deprecated. Do not use it for UA detection.
  ImportXULIntoContentWarning=Importing XUL nodes into a content document is deprecated. This functionality may be removed soon.
@@ -15,11 +15,12 @@ diff --git a/dom/locales/en-US/chrome/dom/dom.properties b/dom/locales/en-US/chr
  IndexedDBTransactionAbortNavigation=An IndexedDB transaction that was not yet complete has been aborted due to page navigation.
  # LOCALIZATION NOTE (WillChangeBudgetWarning): Do not translate Will-change, %1$S,%2$S,%3$S are numbers.
  WillChangeBudgetWarning=Will-change memory consumption is too high. Surface area covers %1$S pixels, budget is the document surface area multiplied by %2$S (%3$S pixels). All occurences of will-change in the document are ignored when over budget.
-+HittingMaxWorkersPerDomain=ServiceWorker spawn gets queued due to hitting max workers per domain limit.
++# LOCALIZATION NOTE: Do not translate "ServiceWorker".
++HittingMaxWorkersPerDomain=A ServiceWorker could not be started immediately because other documents in the same origin are already using the maximum number of workers. The ServiceWorker is now queued and will be started after some of the other workers have completed.
 diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
 --- a/dom/workers/RuntimeService.cpp
 +++ b/dom/workers/RuntimeService.cpp
-@@ -9,29 +9,31 @@
+@@ -9,28 +9,30 @@
  #include "nsIChannel.h"
  #include "nsIContentSecurityPolicy.h"
  #include "nsIDocument.h"
@@ -41,8 +42,8 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  #include "jsfriendapi.h"
  #include "mozilla/ArrayUtils.h"
  #include "mozilla/CycleCollectedJSRuntime.h"
- #include "mozilla/TimeStamp.h"
 +#include "mozilla/Telemetry.h"
+ #include "mozilla/TimeStamp.h"
  #include "mozilla/dom/asmjscache/AsmJSCache.h"
  #include "mozilla/dom/AtomList.h"
  #include "mozilla/dom/BindingUtils.h"
@@ -50,7 +51,6 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  #include "mozilla/dom/EventTargetBinding.h"
  #include "mozilla/dom/MessageEventBinding.h"
  #include "mozilla/dom/WorkerBinding.h"
- #include "mozilla/dom/ScriptSettings.h"
 @@ -1409,16 +1411,22 @@ RuntimeService::RegisterWorker(JSContext
      if (mShuttingDown) {
        JS_ReportError(aCx, "Cannot create worker during shutdown!");
@@ -60,7 +60,7 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  
    nsCString sharedWorkerScriptSpec;
  
-+  bool isServiceWorker = aWorkerPrivate->IsServiceWorker();
++  const bool isServiceWorker = aWorkerPrivate->IsServiceWorker();
 +  if (isServiceWorker) {
 +    AssertIsOnMainThread();
 +    Telemetry::Accumulate(Telemetry::SERVICE_WORKER_SPAWN_ATTEMPTS, 1);
@@ -125,37 +125,10 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
  {
    aWorkerPrivate->AssertIsOnParentThread();
  
-diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
---- a/dom/workers/ServiceWorkerManager.cpp
-+++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -2370,21 +2370,23 @@ ServiceWorkerManager::IsControlled(nsIDo
- }
- 
- nsresult
- ServiceWorkerManager::GetDocumentRegistration(nsIDocument* aDoc,
-                                               ServiceWorkerRegistrationInfo** aRegistrationInfo)
- {
-   nsRefPtr<ServiceWorkerRegistrationInfo> registration;
-   if (!mControlledDocuments.Get(aDoc, getter_AddRefs(registration))) {
-+    printf_stderr("### ### At ServiceWorkerManager::GetDocumentRegistration() !mControlledDocuments.Get(aDoc, getter_AddRefs(registration))\n");
-     return NS_ERROR_NOT_AVAILABLE;
-   }
- 
-   // If the document is controlled, the current worker MUST be non-null.
-   if (!registration->mActiveWorker) {
-+    printf_stderr("### ### At ServiceWorkerManager::GetDocumentRegistration() !registration->mActiveWorker\n");
-     return NS_ERROR_NOT_AVAILABLE;
-   }
- 
-   registration.forget(aRegistrationInfo);
-   return NS_OK;
- }
- 
- /*
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
-@@ -7673,10 +7673,25 @@
+@@ -7686,10 +7686,25 @@
      "kind": "count",
      "description": "Count slow script notices"
    },
