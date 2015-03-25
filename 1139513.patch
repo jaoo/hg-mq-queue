@@ -1,7 +1,7 @@
 # HG changeset patch
 # Parent 7e1f549793005a18d8f71345b1e293d6e8c8d78a
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
-Bug 1139513 - Warn and gather data if ServiceWorker hits max workers per domain limit. r=nsm
+Bug 1139513 - Warn and gather data if ServiceWorker hits max workers per domain limit. r=bent,rvitillo
 
 diff --git a/dom/locales/en-US/chrome/dom/dom.properties b/dom/locales/en-US/chrome/dom/dom.properties
 --- a/dom/locales/en-US/chrome/dom/dom.properties
@@ -139,17 +139,17 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
      "description": "Count plugin hang notices in e10s"
 +  },
 +  "SERVICE_WORKER_SPAWN_ATTEMPTS": {
-+    "expires_in_version": "never",
++    "expires_in_version": "50",
 +    "kind": "count",
 +    "description": "Count attempts to spawn a ServiceWorker for a domain"
 +  },
 +  "SERVICE_WORKER_WAS_SPAWNED": {
-+    "expires_in_version": "never",
++    "expires_in_version": "50",
 +    "kind": "count",
 +    "description": "Count ServiceWorkers that really did get a thread created for them"
 +  },
 +  "SERVICE_WORKER_SPAWN_GETS_QUEUED": {
-+    "expires_in_version": "never",
++    "expires_in_version": "50",
 +    "kind": "count",
 +    "description": "Tracking whether a ServiceWorker spawn gets queued due to hitting max workers per domain limit"
    }
