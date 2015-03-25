@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent fa9a97b7b4d799fff8d34fe0dbd4d8d757b6e0c7
+# Parent 06d2554bde98b703857aae8ba31cd42b975b7a04
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm,miker
 
@@ -272,8 +272,8 @@ rename to browser/devtools/framework/test/serviceworker.sjs
 + * http://creativecommons.org/publicdomain/zero/1.0/ */
 +
 +// For bug 1134329 we need to test that several calls to
-+// navigator.serviceWorker.register() with the same script URL and if the
-+// devtools 'force update' pref is set skip [[Register]] step 4.2.2.1 and the
++// navigator.serviceWorker.register() with the same script URL with the
++// devtools 'force update' pref set, skip [[Register]] step 4.2.2.1 and the
 +// update is done. Byte-for-byte equal scripts will abort the update so this
 +// server-side JavaScript file will return slightly different 'service worker
 +// scripts' on each call.
@@ -282,7 +282,7 @@ rename to browser/devtools/framework/test/serviceworker.sjs
 +  // These are the different service worker scripts we will return. The order
 +  // does not really matter but the comment in them gives us an idea about what
 +  // script will be use for each test. The goal is the script we return differs
-+  // byte-for-byte from the prevoiusly script returned.
++  // byte-for-byte from the previously script returned.
 +  let serviceWorkers = [
 +    "// empty service worker for testing https only restriction",
 +    "// empty service worker for testing installing worker",
@@ -293,7 +293,7 @@ rename to browser/devtools/framework/test/serviceworker.sjs
 +
 +  // This server-side JavaScript file will be requested to return more service
 +  // worker scritps than the ones we defined above. This is because while
-+  // clearing the pref in the devtool option panel the tab is reloaded so let's
++  // clearing the pref in the devtool option panel the tab is reloaded. So let's
 +  // respond with a 500 error code rather than empty service worker.
 +  if (index < serviceWorkers.length) {
 +    response.write(serviceWorkers[index]);
