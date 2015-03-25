@@ -1,13 +1,31 @@
 # HG changeset patch
-# Parent 6229a2b58212102344fc13881703d3cae17e9490
+# Parent 7e1f549793005a18d8f71345b1e293d6e8c8d78a
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1122161 - Redirected channels should respect skip service worker flag. r=nsm
 
 diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
 --- a/dom/workers/test/serviceworkers/mochitest.ini
 +++ b/dom/workers/test/serviceworkers/mochitest.ini
-@@ -63,8 +63,10 @@ support-files =
- [test_post_message.html]
+@@ -46,16 +46,18 @@ support-files =
+   message_receiver.html
+   close_test.js
+   serviceworker_not_sharedworker.js
+   match_all_client/match_all_client_id.html
+   match_all_client_id_worker.js
+   source_message_posting_worker.js
+   scope/scope_worker.js
+   redirect_serviceworker.sjs
++  redirect_intercepted_worker.js
++  skipFlag/index.html
+ 
+ [test_unregister.html]
+ [test_installation_simple.html]
+ [test_fetch_event.html]
+ [test_https_fetch.html]
+ [test_https_fetch_cloned_response.html]
+ [test_match_all.html]
+ [test_match_all_advanced.html]
+@@ -69,8 +71,9 @@ support-files =
  [test_post_message_advanced.html]
  [test_post_message_source.html]
  [test_match_all_client_properties.html]
@@ -15,9 +33,184 @@ diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/se
  [test_serviceworker_interfaces.html]
  [test_serviceworker_not_sharedworker.html]
  [test_match_all_client_id.html]
+ [test_sandbox_intercept.html]
 +[test_redirect_intercepted.html]
-+[test_respect_skip_flag.html]
+diff --git a/dom/workers/test/serviceworkers/redirect_intercepted_worker.js b/dom/workers/test/serviceworkers/redirect_intercepted_worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/redirect_intercepted_worker.js
+@@ -0,0 +1,25 @@
++/* Any copyright is dedicated to the Public Domain.
++ * http://creativecommons.org/publicdomain/zero/1.0/ */
++
++self.addEventListener('fetch', evt => {
++  var request = evt.request;
++  var url = new URL(request.url);
++
++  dump('fetching ' + url.pathname + '\n');
++
++  if (evt.request.url.contains("something.txt")) {
++    evt.respondWith(Promise.resolve(
++      Response.redirect(
++        'http://mochi.test:8888/tests/dom/workers/test/serviceworkers/skipFlag/somethingelse.txt'
++      )
++    ));
++  } else if (evt.request.url.contains("somethingelse.txt")) {
++    evt.respondWith(Promise.resolve(
++      new Response("something else response body", {})
++    ));
++  } else {
++    evt.respondWith(fetch(request).then((response) => {
++      return response;
++    }));
++  }
++});
+diff --git a/dom/workers/test/serviceworkers/skipFlag/index.html b/dom/workers/test/serviceworkers/skipFlag/index.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/skipFlag/index.html
+@@ -0,0 +1,64 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1122161 - Redirect location fetch should be intercepted</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<div id="style-test" style="background-color: white"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++  function my_ok(result, msg) {
++    window.opener.postMessage({status: "ok", result: result, message: msg}, "*");
++  }
++
++  function fetchXHR(name, onload, onerror, headers) {
++    gExpected++;
++
++    onload = onload || function() {
++      my_ok(false, "load should not complete successfully");
++      finish();
++    };
++    onerror = onerror || function() {
++      my_ok(false, "load should be intercepted successfully");
++      finish();
++    };
++
++    var x = new XMLHttpRequest();
++    x.open('GET', name, true);
++    x.onload = function() { onload(x) };
++    x.onerror = function() { onerror(x) };
++    headers = headers || [];
++    headers.forEach(function(header) {
++      x.setRequestHeader(header[0], header[1]);
++    });
++    x.send();
++  }
++
++  var gExpected = 0;
++  var gEncountered = 0;
++  function finish() {
++    gEncountered++;
++    if (gEncountered == gExpected) {
++      window.opener.postMessage({status: "done"}, "*");
++    }
++  }
++
++  my_ok(true, 'Window load correctly');
++
++  fetchXHR('something.txt', function(xhr) {
++    my_ok(xhr.status == 200, "load should be successful");
++    my_ok(xhr.responseText == "something else response body", "load should have something else");
++    finish();
++  });  
++</script>
++</pre>
++</body>
++</html>
 diff --git a/dom/workers/test/serviceworkers/test_redirect_intercepted.html b/dom/workers/test/serviceworkers/test_redirect_intercepted.html
 new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/test_redirect_intercepted.html
+@@ -0,0 +1,73 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1122161 - Redirect location fetch should be intercepted</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++  SimpleTest.requestCompleteLog();
++
++  function simpleRegister() {
++    var p = navigator.serviceWorker.register("redirect_intercepted_worker.js",
++                                             { scope: "./skipFlag" });
++    return p.then(function(swr) {
++      return new Promise(function(resolve) {
++        swr.installing.onstatechange = resolve;
++      });
++    });
++  }
++
++  function testRedirectIntercepted() {
++    var p = new Promise(function(resolve, reject) {
++      var reloaded = false;
++      window.onmessage = function(e) {
++        if (e.data.status == "ok") {
++          ok(e.data.result, e.data.message);
++        } else if (e.data.status == "done") {
++          if (reloaded) {
++            window.onmessage = null;
++            w.close();
++            resolve();
++          } else {
++            w.location.reload();
++            reloaded = true;
++          }
++        }
++      }
++    });
++
++    var w = window.open("skipFlag/index.html");
++    return p;
++  }
++
++  function runTest() {
++    simpleRegister()
++      .then(testRedirectIntercepted)
++      .then(function() {
++        SimpleTest.finish();
++      }).catch(function(e) {
++        ok(false, "Some test failed with error " + e);
++        SimpleTest.finish();
++      });
++  }
++
++  SimpleTest.waitForExplicitFinish();
++  SpecialPowers.pushPrefEnv({"set": [
++    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++    ["dom.serviceWorkers.enabled", true],
++    ["dom.serviceWorkers.testing.enabled", true],
++  ]}, runTest);
++</script>
++</pre>
++</body>
++</html>
++
 diff --git a/dom/workers/test/serviceworkers/test_respect_skip_flag.html b/dom/workers/test/serviceworkers/test_respect_skip_flag.html
 new file mode 100644
