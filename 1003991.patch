@@ -109,8 +109,8 @@ new file mode 100644
 +          button.click();
 +        },
 +        error => {
++          var button = document.getElementById("button");
 +          if (error.name === "SecurityError") {
-+            var button = document.getElementById("button");
 +            log("SecurityError");
 +          }
 +          button.click();
