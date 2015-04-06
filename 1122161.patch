@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 748b96aa103bf1e8d785504eda0e43bc348f6880
+# Parent 4fe763cbe1961059f9051084afb6e300c6bf399f
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1122161 - Redirected channels should respect skip service worker flag. r=nsm
 
@@ -45,7 +45,7 @@ diff --git a/dom/workers/test/serviceworkers/fetch/fetch_tests.js b/dom/workers/
 diff --git a/dom/workers/test/serviceworkers/fetch_event_worker.js b/dom/workers/test/serviceworkers/fetch_event_worker.js
 --- a/dom/workers/test/serviceworkers/fetch_event_worker.js
 +++ b/dom/workers/test/serviceworkers/fetch_event_worker.js
-@@ -154,10 +154,28 @@ onfetch = function(ev) {
+@@ -154,10 +154,24 @@ onfetch = function(ev) {
                                           "message: 'reload status should be indicated'}, '*');" +
                       "opener.postMessage({status: 'done'}, '*');" +
                     "</script>";
@@ -56,22 +56,18 @@ diff --git a/dom/workers/test/serviceworkers/fetch_event_worker.js b/dom/workers
      }
 +  } else if (ev.request.url.contains('something.txt')) {
 +    ev.respondWith(Promise.resolve(
-+      Response.redirect(
-+        'http://mochi.test:8888/tests/dom/workers/test/serviceworkers/fetch/somethingelse.txt'
-+      )
++      Response.redirect('fetch/somethingelse.txt')
 +    ));
 +  } else if (ev.request.url.contains('somethingelse.txt')) {
 +    ev.respondWith(Promise.resolve(
 +      new Response('something else response body', {})
 +    ));
 +  } else if (ev.request.url.contains('redirect_serviceworker.sjs')) {
-+    var redirect_url = 'http://mochi.test:8888/tests/dom/workers/test/serviceworkers/redirect_serviceworker.sjs';
 +    // The redirect_serviceworker.sjs server-side JavaScript file redirects to
 +    // 'http://mochi.test:8888/tests/dom/workers/test/serviceworkers/worker.js'
-+    // That redirect location fetch does not go through this SW. Why?, because
-+    // if the location fetch went through the SW, the SW would need take care of
-+    // it to get the test passing.
-+    ev.respondWith(fetch(redirect_url));
++    // The redirected fetch should not go through the SW since the original
++    // fetch was initiated from a SW.
++    ev.respondWith(fetch('redirect_serviceworker.sjs'));
    }
 -}
 +};
