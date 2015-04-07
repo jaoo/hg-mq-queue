@@ -266,7 +266,7 @@ rename from browser/devtools/framework/test/serviceworker.js
 rename to browser/devtools/framework/test/serviceworker.sjs
 --- a/browser/devtools/framework/test/serviceworker.js
 +++ b/browser/devtools/framework/test/serviceworker.sjs
-@@ -1,1 +1,35 @@
+@@ -1,1 +1,41 @@
 -// empty service worker, always succeed!
 +/* Any copyright is dedicated to the Public Domain.
 + * http://creativecommons.org/publicdomain/zero/1.0/ */
@@ -285,9 +285,13 @@ rename to browser/devtools/framework/test/serviceworker.sjs
 +  // byte-for-byte from the previously script returned.
 +  let serviceWorkers = [
 +    "// empty service worker for testing https only restriction",
++    "// empty service worker for testing https only restriction",
++    "// empty service worker for testing installing worker",
 +    "// empty service worker for testing installing worker",
 +    "// empty service worker for testing active worker",
++    "// empty service worker for testing active worker",
 +    "// empty service worker for testing waiting worker",
++    "// empty service worker for testing waiting worker"
 +  ];
 +  let index = parseInt(getState("index")) || 0;
 +
@@ -297,9 +301,11 @@ rename to browser/devtools/framework/test/serviceworker.sjs
 +  // respond with a 500 error code rather than empty service worker.
 +  if (index < serviceWorkers.length) {
 +    response.write(serviceWorkers[index]);
++    dump('Returns ' + serviceWorkers[index] + '\n');
 +    index++;
 +    setState("index", index.toString());
 +  } else {
++    dump('Returns error 500 KO\n');
 +    response.setStatusLine(request.httpVersion, 500, "K0");
 +  }
 +}
