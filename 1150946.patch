@@ -1,0 +1,31 @@
+# HG changeset patch
+# Parent cb2764d57af8730a8499221a4ddd8e071becdece
+# User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
+Bug 1150946 - Relabel Service Workers toolbox option. r=jryans
+
+diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
+--- a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
++++ b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
+@@ -94,19 +94,19 @@
+ <!-- LOCALIZATION NOTE (options.disableCache.label2,
+   -  options.disableCache.tooltip2): This is the options panel label and
+   -  tooltip for the checkbox that toggles the cache on or off. -->
+ <!ENTITY options.disableCache.label2     "Disable Cache (when toolbox is open)">
+ <!ENTITY options.disableCache.tooltip2   "Turning this option on will disable the cache for all tabs that have the toolbox open.">
+ 
+ <!-- LOCALIZATION NOTE (options.enableServiceWorkersTesting.label,
+   -  options.enableServiceWorkersTesting.tooltip): This is the options panel label and
+-  -  tooltip for the checkbox that toggles the service workers testing features on or off. -->
+-<!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workers testing features (when toolbox is open)">
+-<!ENTITY options.enableServiceWorkersTesting.tooltip   "Turning this option on will enable the service workers testing features for all tabs that have the toolbox open.">
++  -  tooltip for the checkbox that toggles the service workers testing features on or off. This option enables service workers over HTTP. -->
++<!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workers over HTTP (when toolbox is open)">
++<!ENTITY options.enableServiceWorkersTesting.tooltip   "Turning this option on will enable the service workers over HTTP for all tabs that have the toolbox open.">
+ 
+ <!-- LOCALIZATION NOTE (options.selectDefaultTools.label): This is the label for
+   -  the heading of group of checkboxes corresponding to the default developer
+   -  tools. -->
+ <!ENTITY options.selectDefaultTools.label     "Default Firefox Developer Tools">
+ 
+ <!-- LOCALIZATION NOTE (options.selectAdditionalTools.label): This is the label for
+   -  the heading of group of checkboxes corresponding to the developer tools
