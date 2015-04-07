@@ -1,0 +1,47 @@
+# HG changeset patch
+# Parent 66e9dd7039bbb2f436c7bb10f44095686bd62f0c
+# User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
+Bug 1115820 - Add telemetry to ServiceWorkers. r=nsm
+
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -985,16 +985,19 @@ ServiceWorkerManager::Register(nsIDOMWin
+ 
+   nsRefPtr<ServiceWorkerResolveWindowPromiseOnUpdateCallback> cb =
+     new ServiceWorkerResolveWindowPromiseOnUpdateCallback(window, promise);
+ 
+   nsRefPtr<ServiceWorkerRegisterJob> job =
+     new ServiceWorkerRegisterJob(queue, cleanedScope, spec, cb, documentPrincipal);
+   queue->Append(job);
+ 
++  AssertIsOnMainThread();
++  Telemetry::Accumulate(Telemetry::SERVICE_WORKER_REGISTRATIONS, 1);
++
+   promise.forget(aPromise);
+   return NS_OK;
+ }
+ 
+ void
+ ServiceWorkerManager::AppendPendingOperation(ServiceWorkerJobQueue* aQueue,
+                                              ServiceWorkerJob* aJob)
+ {
+diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
+--- a/toolkit/components/telemetry/Histograms.json
++++ b/toolkit/components/telemetry/Histograms.json
+@@ -7951,10 +7951,15 @@
+     "expires_in_version": "50",
+     "kind": "count",
+     "description": "Count ServiceWorkers that really did get a thread created for them"
+   },
+   "SERVICE_WORKER_SPAWN_GETS_QUEUED": {
+     "expires_in_version": "50",
+     "kind": "count",
+     "description": "Tracking whether a ServiceWorker spawn gets queued due to hitting max workers per domain limit"
++  },
++  "SERVICE_WORKER_REGISTRATIONS": {
++    "expires_in_version": "50",
++    "kind": "count",
++    "description": "Count how many registrations occurs."
+   }
+ }
