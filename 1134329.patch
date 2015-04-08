@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent ab0490972e1e47a356c3fc2f9e749a2d77a9739b
+# Parent 078128c2600a0c695f8a16bf561b171a523daedd
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm,miker
 
@@ -266,7 +266,7 @@ rename from browser/devtools/framework/test/serviceworker.js
 rename to browser/devtools/framework/test/serviceworker.sjs
 --- a/browser/devtools/framework/test/serviceworker.js
 +++ b/browser/devtools/framework/test/serviceworker.sjs
-@@ -1,1 +1,41 @@
+@@ -1,1 +1,39 @@
 -// empty service worker, always succeed!
 +/* Any copyright is dedicated to the Public Domain.
 + * http://creativecommons.org/publicdomain/zero/1.0/ */
@@ -284,8 +284,6 @@ rename to browser/devtools/framework/test/serviceworker.sjs
 +  // script will be use for each test. The goal is the script we return differs
 +  // byte-for-byte from the previously script returned.
 +  let serviceWorkers = [
-+    "// empty service worker for testing https only restriction",
-+    "// empty service worker for testing https only restriction",
 +    "// empty service worker for testing installing worker",
 +    "// empty service worker for testing installing worker",
 +    "// empty service worker for testing active worker",

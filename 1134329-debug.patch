@@ -1,0 +1,236 @@
+# HG changeset patch
+# Parent 96acfa434f6c6f21a9097fb4211c9a7b392dfac2
+# User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
+Bug 1134329 - Debug bits
+
+diff --git a/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.html b/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.html
+--- a/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.html
++++ b/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.html
+@@ -12,28 +12,48 @@
+       }
+ 
+       h1 {
+         font-size: 20px
+       }
+     </style>
+     <script type="application/javascript;version=1.8">
+       function log(msg) {
++        dump('log ' + msg + '\n');
+         var output = document.getElementById("output");
+ 
+         output.innerHTML = msg;
+       }
+ 
+       navigator.serviceWorker.register("serviceworker.sjs").then(
+         swr => {
+           var msg = "";
+           var button = document.getElementById("button");
+           if (swr.installing) {
+             msg += "Installing worker/";
+           }
++          <!-- if (swr.installing) { -->
++          <!--   swr.installing.addEventListener('statechange', function onStateChange() { -->
++          <!--     dump('installing statechange\n'); -->
++          <!--     if (swr.active) { -->
++          <!--       dump('remove installing statechange\n'); -->
++          <!--       swr.installing && swr.installing.removeEventListener('statechange', onStateChange); -->
++          <!--       swr.active.addEventListener('statechange', function onStateChange2() { -->
++          <!--         dump('active statechange\n'); -->
++          <!--         if (swr.active.state === 'activated') { -->
++          <!--           dump('remove active statechange\n'); -->
++          <!--           swr.active && swr.active.removeEventListener('statechange', onStateChange2); -->
++          <!--           msg += "Installing worker/"; -->
++          <!--           log(msg); -->
++          <!--           button.click(); -->
++          <!--         } -->
++          <!--       }); -->
++          <!--     }               -->
++          <!--   }); -->
++          <!-- } -->
+           if (swr.waiting) {
+             msg += "Waiting worker/";
+           }
+           if (swr.active) {
+             msg += "Active worker/";
+           }
+           log(msg);
+           button.click();
+diff --git a/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.js b/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.js
+--- a/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.js
++++ b/browser/devtools/framework/test/browser_toolbox_options_serviceworkers.js
+@@ -55,45 +55,48 @@ function testRegisterFails() {
+     is(output.textContent,
+        "SecurityError",
+        "SecurityError expected");
+     testRegisterInstallingWorker();
+   }
+ 
+   if (output.textContent !== "No output") {
+     doTheCheck();
++  } else {
++    button.addEventListener('click', function onClick() {
++      button.removeEventListener('click', onClick);
++      doTheCheck();
++    });
+   }
+-
+-  button.addEventListener('click', function onClick() {
+-    button.removeEventListener('click', onClick);
+-    doTheCheck();
+-  });
+ }
+ 
+ function testRegisterInstallingWorker() {
+   toggleCheckbox(TESTING_ELEMENT_ID).then(() => {
+     let output = doc.getElementById("output");
+     let button = doc.getElementById("button");
+ 
+     function doTheCheck() {
+       info("Testing it registers correctly and there is an installing worker");
+       is(output.textContent,
+          "Installing worker/",
+          "Installing worker expected");
+       testRegisterActiveWorker();
++      // toggleCheckbox(FORCEUPDATE_ELEMENT_ID).then(() => {
++      //   toggleCheckbox(TESTING_ELEMENT_ID).then(finishUp);
++      // });
+     }
+ 
+     if (output.textContent !== "No output") {
+       doTheCheck();
++    } else {
++      button.addEventListener('click', function onClick() {
++        button.removeEventListener('click', onClick);
++        doTheCheck();
++      });
+     }
+-
+-    button.addEventListener('click', function onClick() {
+-      button.removeEventListener('click', onClick);
+-      doTheCheck();
+-    });
+   });
+ }
+ 
+ function testRegisterActiveWorker() {
+   toggleCheckbox(FORCEUPDATE_ELEMENT_ID).then(() => {
+     let output = doc.getElementById("output");
+     let button = doc.getElementById("button");
+ 
+@@ -103,48 +106,49 @@ function testRegisterActiveWorker() {
+       is(output.textContent,
+          "Installing worker/Active worker/",
+          "Installing and active worker expected");
+       testRegisterWaitingWorker();
+     }
+ 
+     if (output.textContent !== "No output") {
+       doTheCheck();
++    } else {
++      button.addEventListener('click', function onClick() {
++        button.addEventListener('click', onClick);
++        doTheCheck();
++      });
+     }
+-    button.addEventListener('click', function onClick() {
+-      button.addEventListener('click', onClick);
+-      doTheCheck();
+-    });
+   });
+ }
+ 
+ function testRegisterWaitingWorker() {
+   reload().then(() => {
+     let output = doc.getElementById("output");
+     let button = doc.getElementById("button");
+ 
+     function doTheCheck() {
+       info("Testing it registers correctly and there are three worker: an " +
+-           " installing, a waiting and active worker");
++           "installing, a waiting and active worker");
+       is(output.textContent,
+          "Installing worker/Waiting worker/Active worker/",
+          "Installing, waiting and active worker expected");
+       toggleCheckbox(FORCEUPDATE_ELEMENT_ID).then(() => {
+         toggleCheckbox(TESTING_ELEMENT_ID).then(finishUp);
+       });
+     }
+ 
+     if (output.textContent !== "No output") {
+       doTheCheck();
++    } else {
++      button.addEventListener('click', function onClick() {
++        button.addEventListener('click', onClick);
++        doTheCheck();
++      });
+     }
+-
+-    button.addEventListener('click', function onClick() {
+-      button.addEventListener('click', onClick);
+-      doTheCheck();
+-    });
+   });
+ }
+ 
+ function toggleCheckbox(elementId) {
+   let deferred = promise.defer();
+ 
+   let panel = toolbox.getCurrentPanel();
+   let cbx = panel.panelDoc.getElementById(elementId);
+@@ -154,16 +158,17 @@ function toggleCheckbox(elementId) {
+   if (cbx.checked) {
+     info("Clearing " + elementId + " checkbox");
+   } else {
+     info("Checking " + elementId + " checkbox");
+   }
+ 
+   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
+     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
++    dump('### ### Load tab\n');
+     doc = content.document;
+     deferred.resolve();
+   }, true);
+ 
+   cbx.click();
+ 
+   let mm = getFrameScript();
+   mm.sendAsyncMessage("devtools:test:reload");
+@@ -171,16 +176,17 @@ function toggleCheckbox(elementId) {
+   return deferred.promise;
+ }
+ 
+ function reload() {
+   let deferred = promise.defer();
+ 
+   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
+     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
++    dump('### ### Load tab\n');
+     doc = content.document;
+     deferred.resolve();
+   }, true);
+ 
+   let mm = getFrameScript();
+   mm.sendAsyncMessage("devtools:test:reload");
+ 
+   return deferred.promise;
+diff --git a/browser/devtools/framework/test/serviceworker.sjs b/browser/devtools/framework/test/serviceworker.sjs
+--- a/browser/devtools/framework/test/serviceworker.sjs
++++ b/browser/devtools/framework/test/serviceworker.sjs
+@@ -17,16 +17,17 @@ function handleRequest(request, response
+     "// empty service worker for testing installing worker",
+     "// empty service worker for testing installing worker",
+     "// empty service worker for testing active worker",
+     "// empty service worker for testing active worker",
+     "// empty service worker for testing waiting worker",
+     "// empty service worker for testing waiting worker"
+   ];
+   let index = parseInt(getState("index")) || 0;
++  dump('serviceworker.sjs file loaded (index is ' + index + ')\n');
+ 
+   // This server-side JavaScript file will be requested to return more service
+   // worker scritps than the ones we defined above. This is because while
+   // clearing the pref in the devtool option panel the tab is reloaded. So let's
+   // respond with a 500 error code rather than empty service worker.
+   if (index < serviceWorkers.length) {
+     response.write(serviceWorkers[index]);
+     dump('Returns ' + serviceWorkers[index] + '\n');

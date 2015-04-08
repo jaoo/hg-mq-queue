@@ -1,0 +1,130 @@
+# HG changeset patch
+# Parent 078128c2600a0c695f8a16bf561b171a523daedd
+# User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
+Bug 1134329 - New test under dom/workers/test/serviceworker/
+
+diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
+--- a/dom/workers/test/serviceworkers/mochitest.ini
++++ b/dom/workers/test/serviceworkers/mochitest.ini
+@@ -60,16 +60,17 @@ support-files =
+   match_all_client/match_all_client_id.html
+   match_all_client_id_worker.js
+   source_message_posting_worker.js
+   scope/scope_worker.js
+   redirect_serviceworker.sjs
+   importscript.sjs
+   importscript_worker.js
+   client_focus_worker.js
++  serviceworker.sjs
+ 
+ [test_unregister.html]
+ [test_installation_simple.html]
+ [test_fetch_event.html]
+ skip-if = true # Bug 1136780
+ [test_https_fetch.html]
+ [test_https_fetch_cloned_response.html]
+ [test_match_all.html]
+@@ -87,8 +88,9 @@ skip-if = true # Bug 1136780
+ [test_close.html]
+ [test_serviceworker_interfaces.html]
+ [test_serviceworker_not_sharedworker.html]
+ [test_match_all_client_id.html]
+ [test_sandbox_intercept.html]
+ [test_request_context.html]
+ [test_importscript.html]
+ [test_client_focus.html]
++[test_force_update.html]
+diff --git a/dom/workers/test/serviceworkers/serviceworker.sjs b/dom/workers/test/serviceworkers/serviceworker.sjs
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/serviceworker.sjs
+@@ -0,0 +1,40 @@
++/* Any copyright is dedicated to the Public Domain.
++ * http://creativecommons.org/publicdomain/zero/1.0/ */
++
++// For bug 1134329 we need to test that several calls to
++// navigator.serviceWorker.register() with the same script URL with the
++// devtools 'force update' pref set, skip [[Register]] step 4.2.2.1 and the
++// update is done. Byte-for-byte equal scripts will abort the update so this
++// server-side JavaScript file will return slightly different 'service worker
++// scripts' on each call.
++
++function handleRequest(request, response) {
++  // These are the different service worker scripts we will return. The order
++  // does not really matter but the comment in them gives us an idea about what
++  // script will be use for each test. The goal is the script we return differs
++  // byte-for-byte from the previously script returned.
++  let serviceWorkers = [
++    "// empty service worker for testing installing worker",
++    "// empty service worker for testing installing worker",
++    "// empty service worker for testing active worker",
++    "// empty service worker for testing active worker",
++    "// empty service worker for testing waiting worker",
++    "// empty service worker for testing waiting worker"
++  ];
++  let index = parseInt(getState("index")) || 0;
++  dump('serviceworker.sjs file loaded (index is ' + index + ')\n');
++
++  // This server-side JavaScript file will be requested to return more service
++  // worker scritps than the ones we defined above. This is because while
++  // clearing the pref in the devtool option panel the tab is reloaded. So let's
++  // respond with a 500 error code rather than empty service worker.
++  if (index < serviceWorkers.length) {
++    response.write(serviceWorkers[index]);
++    dump('Returns ' + serviceWorkers[index] + '\n');
++    index++;
++    setState("index", index.toString());
++  } else {
++    dump('Returns error 500 KO\n');
++    response.setStatusLine(request.httpVersion, 500, "K0");
++  }
++}
+diff --git a/dom/workers/test/serviceworkers/test_force_update.html b/dom/workers/test/serviceworkers/test_force_update.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/test_force_update.html
+@@ -0,0 +1,44 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title> Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++
++  function simpleRegister() {
++    return navigator.serviceWorker.register("serviceworker.sjs", { scope: "forceupdate/" });
++  }
++
++  function runTest() {
++    simpleRegister()
++      .then(function() {
++        ok(true, "Force update tests worked");
++        SimpleTest.finish();
++      }).catch(function(e) {
++        ok(false, "Some test failed with error " + e);
++        SimpleTest.finish();
++      });
++  }
++
++  SimpleTest.waitForExplicitFinish();
++  SpecialPowers.pushPrefEnv({"set": [
++    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++    ["dom.messageChannel.enabled", true],
++    ["dom.serviceWorkers.enabled", true],
++    ["dom.serviceWorkers.testing.enabled", true]
++  ]}, runTest);
++</script>
++</pre>
++</body>
++</html>
++
