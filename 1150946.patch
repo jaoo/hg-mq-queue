@@ -1,26 +1,54 @@
 # HG changeset patch
-# Parent cb2764d57af8730a8499221a4ddd8e071becdece
+# Parent 078128c2600a0c695f8a16bf561b171a523daedd
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
-Bug 1150946 - Relabel Service Workers toolbox option. r=jryans
+Bug 1150946 - Relabel Service Workers toolbox option. r=nsm,jryans
 
+diff --git a/browser/devtools/framework/toolbox-options.xul b/browser/devtools/framework/toolbox-options.xul
+--- a/browser/devtools/framework/toolbox-options.xul
++++ b/browser/devtools/framework/toolbox-options.xul
+@@ -141,18 +141,18 @@
+           <checkbox id="devtools-disable-cache"
+                     label="&options.disableCache.label2;"
+                     tooltiptext="&options.disableCache.tooltip2;"
+                     data-pref="devtools.cache.disabled"/>
+           <checkbox id="devtools-disable-javascript"
+                     label="&options.disableJavaScript.label;"
+                     tooltiptext="&options.disableJavaScript.tooltip;"/>
+           <checkbox id="devtools-enable-serviceWorkersTesting"
+-                    label="&options.enableServiceWorkersTesting.label;"
+-                    tooltiptext="&options.enableServiceWorkersTesting.tooltip;"
++                    label="&options.enableServiceWorkersHTTP.label;"
++                    tooltiptext="&options.enableServiceWorkersHTTP.tooltip;"
+                     data-pref="devtools.serviceWorkers.testing.enabled"/>
+           <hbox class="hidden-labels-box">
+             <checkbox label="&options.enableChrome.label5;"
+                       tooltiptext="&options.enableChrome.tooltip3;"
+                       data-pref="devtools.chrome.enabled"/>
+           </hbox>
+           <hbox class="hidden-labels-box">
+             <checkbox label="&options.enableRemote.label3;"
 diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
 --- a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
 +++ b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
-@@ -94,19 +94,19 @@
+@@ -92,21 +92,21 @@
+ <!ENTITY options.disableJavaScript.tooltip   "Turning this option on will disable JavaScript for the current tab. If the tab or the toolbox is closed then this setting will be forgotten.">
+ 
  <!-- LOCALIZATION NOTE (options.disableCache.label2,
    -  options.disableCache.tooltip2): This is the options panel label and
    -  tooltip for the checkbox that toggles the cache on or off. -->
  <!ENTITY options.disableCache.label2     "Disable Cache (when toolbox is open)">
  <!ENTITY options.disableCache.tooltip2   "Turning this option on will disable the cache for all tabs that have the toolbox open.">
  
- <!-- LOCALIZATION NOTE (options.enableServiceWorkersTesting.label,
-   -  options.enableServiceWorkersTesting.tooltip): This is the options panel label and
+-<!-- LOCALIZATION NOTE (options.enableServiceWorkersTesting.label,
+-  -  options.enableServiceWorkersTesting.tooltip): This is the options panel label and
 -  -  tooltip for the checkbox that toggles the service workers testing features on or off. -->
 -<!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workers testing features (when toolbox is open)">
 -<!ENTITY options.enableServiceWorkersTesting.tooltip   "Turning this option on will enable the service workers testing features for all tabs that have the toolbox open.">
++<!-- LOCALIZATION NOTE (options.enableServiceWorkersHTTP.label,
++  -  options.enableServiceWorkersHTTP.tooltip): This is the options panel label and
 +  -  tooltip for the checkbox that toggles the service workers testing features on or off. This option enables service workers over HTTP. -->
-+<!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workers over HTTP (when toolbox is open)">
-+<!ENTITY options.enableServiceWorkersTesting.tooltip   "Turning this option on will enable the service workers over HTTP for all tabs that have the toolbox open.">
++<!ENTITY options.enableServiceWorkersHTTP.label     "Enable Service Workers over HTTP (when toolbox is open)">
++<!ENTITY options.enableServiceWorkersHTTP.tooltip   "Turning this option on will enable the service workers over HTTP for all tabs that have the toolbox open.">
  
  <!-- LOCALIZATION NOTE (options.selectDefaultTools.label): This is the label for
    -  the heading of group of checkboxes corresponding to the default developer
