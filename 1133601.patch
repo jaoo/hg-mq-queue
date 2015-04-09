@@ -1,0 +1,642 @@
+# HG changeset patch
+# Parent 2fc2b43a8f38e4ed50870dcb3619a6a3e5bcc8fb
+# User Andrea Marchesini <amarchesini@mozilla.com>
+
+diff --git a/docshell/base/nsAboutRedirector.cpp b/docshell/base/nsAboutRedirector.cpp
+--- a/docshell/base/nsAboutRedirector.cpp
++++ b/docshell/base/nsAboutRedirector.cpp
+@@ -98,16 +98,20 @@ static RedirEntry kRedirMap[] = {
+   {
+     "networking", "chrome://global/content/aboutNetworking.xhtml",
+     nsIAboutModule::ALLOW_SCRIPT
+   },
+   {
+     "webrtc", "chrome://global/content/aboutwebrtc/aboutWebrtc.xhtml",
+     nsIAboutModule::ALLOW_SCRIPT
+   },
++  {
++    "serviceworkers", "chrome://global/content/aboutServiceWorkers.xhtml",
++    nsIAboutModule::ALLOW_SCRIPT
++  },
+   // about:srcdoc is unresolvable by specification.  It is included here
+   // because the security manager would disallow srcdoc iframes otherwise.
+   {
+     "srcdoc", "about:blank",
+     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+       nsIAboutModule::HIDE_FROM_ABOUTABOUT
+   }
+ };
+diff --git a/docshell/build/nsDocShellModule.cpp b/docshell/build/nsDocShellModule.cpp
+--- a/docshell/build/nsDocShellModule.cpp
++++ b/docshell/build/nsDocShellModule.cpp
+@@ -170,16 +170,17 @@ const mozilla::Module::ContractIDEntry k
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "performance", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "addons", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "newaddon", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "support", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "telemetry", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "networking", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "webrtc", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "srcdoc", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
++  { NS_ABOUT_MODULE_CONTRACTID_PREFIX "serviceworkers", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_URI_LOADER_CONTRACTID, &kNS_URI_LOADER_CID },
+   { NS_DOCUMENTLOADER_SERVICE_CONTRACTID, &kNS_DOCUMENTLOADER_SERVICE_CID },
+   { NS_EXTERNALHELPERAPPSERVICE_CONTRACTID, &kNS_EXTERNALHELPERAPPSERVICE_CID },
+   { NS_EXTERNALPROTOCOLSERVICE_CONTRACTID, &kNS_EXTERNALHELPERAPPSERVICE_CID },
+   { NS_MIMESERVICE_CONTRACTID, &kNS_EXTERNALHELPERAPPSERVICE_CID },
+   { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX"default", &kNS_EXTERNALPROTOCOLHANDLER_CID },
+   { NS_PREFETCHSERVICE_CONTRACTID, &kNS_PREFETCHSERVICE_CID },
+   { NS_OFFLINECACHEUPDATESERVICE_CONTRACTID, &kNS_OFFLINECACHEUPDATESERVICE_CID },
+diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
+--- a/dom/interfaces/base/nsIServiceWorkerManager.idl
++++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
+@@ -1,30 +1,44 @@
+ /* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "domstubs.idl"
+ 
++interface nsIArray;
+ interface nsIDocument;
+ interface nsIInterceptedChannel;
+ interface nsIPrincipal;
+ interface nsIURI;
+ 
+ [builtinclass, uuid(d4367ffe-e435-4195-95f8-0a51b1bbfdfb)]
+ interface nsIServiceWorkerUnregisterCallback : nsISupports
+ {
+   // aState is true if the unregistration succeded.
+   // It's false if this ServiceWorkerRegistration doesn't exist.
+   [noscript] void UnregisterSucceeded(in bool aState);
+   [noscript] void UnregisterFailed();
+ };
+ 
+-[builtinclass, uuid(e4c8baa5-237a-4bf6-82d4-ea06eb4b76ba)]
++[scriptable, builtinclass, uuid(8ce0d197-5740-4ddf-aa4a-e5a63e611d03)]
++interface nsIServiceWorkerInfo : nsISupports
++{
++  readonly attribute nsIPrincipal principal;
++
++  readonly attribute DOMString scope;
++  readonly attribute DOMString scriptSpec;
++  readonly attribute DOMString currentWorkerURL;
++
++  readonly attribute DOMString activeCacheName;
++  readonly attribute DOMString waitingCacheName;
++};
++
++[scriptable, builtinclass, uuid(861b55e9-d6ac-47cf-a528-8590e9b44de6)]
+ interface nsIServiceWorkerManager : nsISupports
+ {
+   /**
+    * Registers a ServiceWorker with script loaded from `aScriptURI` to act as
+    * the ServiceWorker for aScope.  Requires a valid entry settings object on
+    * the stack. This means you must call this from content code 'within'
+    * a window.
+    *
+@@ -98,13 +112,17 @@ interface nsIServiceWorkerManager : nsIS
+ 
+   /*
+    * This implements the update algorithm.
+    */
+   void update(in DOMString aScope);
+ 
+   // Testing
+   DOMString getScopeForUrl(in DOMString path);
++
++  // This is meant to be used only by about:serviceworkers. It returns an array
++  // of nsIServiceWorkerInfo.
++  nsIArray getAllRegistrations();
+ };
+ 
+ %{ C++
+ #define SERVICEWORKERMANAGER_CONTRACTID "@mozilla.org/serviceworkers/manager;1"
+ %}
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -8,16 +8,17 @@
+ #include "nsIDOMEventTarget.h"
+ #include "nsIDocument.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsIStreamLoader.h"
+ #include "nsIHttpChannel.h"
+ #include "nsIHttpChannelInternal.h"
+ #include "nsIHttpHeaderVisitor.h"
+ #include "nsINetworkInterceptController.h"
++#include "nsIMutableArray.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsScriptLoader.h"
+ #include "nsDebug.h"
+ 
+ #include "jsapi.h"
+ 
+ #include "mozilla/LoadContext.h"
+ #include "mozilla/dom/BindingUtils.h"
+@@ -2810,16 +2811,140 @@ ServiceWorkerManager::RemoveRegistration
+     //XXXnsm I can't think of any other reason a stored principal would fail to
+     //convert.
+     NS_WARNING("Unable to unregister serviceworker due to possible OOM");
+     return;
+   }
+   mActor->SendUnregisterServiceWorker(principalInfo, NS_ConvertUTF8toUTF16(reg->mScope));
+ }
+ 
++class ServiceWorkerDataInfo final : public nsIServiceWorkerInfo
++{
++public:
++  NS_DECL_ISUPPORTS
++  NS_DECL_NSISERVICEWORKERINFO
++
++  static already_AddRefed<ServiceWorkerDataInfo>
++  Create(const ServiceWorkerRegistrationData& aData);
++
++private:
++  ServiceWorkerDataInfo()
++  {}
++
++  ~ServiceWorkerDataInfo()
++  {}
++
++  nsCOMPtr<nsIPrincipal> mPrincipal;
++  nsString mScope;
++  nsString mScriptSpec;
++  nsString mCurrentWorkerURL;
++  nsString mActiveCacheName;
++  nsString mWaitingCacheName;
++};
++
++NS_IMPL_ISUPPORTS(ServiceWorkerDataInfo, nsIServiceWorkerInfo)
++
++/* static */ already_AddRefed<ServiceWorkerDataInfo>
++ServiceWorkerDataInfo::Create(const ServiceWorkerRegistrationData& aData)
++{
++  AssertIsOnMainThread();
++
++  nsRefPtr<ServiceWorkerDataInfo> info = new ServiceWorkerDataInfo();
++
++  info->mPrincipal = PrincipalInfoToPrincipal(aData.principal());
++  if (!info->mPrincipal) {
++    return nullptr;
++  }
++
++  CopyUTF8toUTF16(aData.scope(), info->mScope);
++  CopyUTF8toUTF16(aData.scriptSpec(), info->mScriptSpec);
++  CopyUTF8toUTF16(aData.currentWorkerURL(), info->mCurrentWorkerURL);
++  info->mActiveCacheName = aData.activeCacheName();
++  info->mWaitingCacheName = aData.waitingCacheName();
++
++  return info.forget();
++}
++
++NS_IMETHODIMP
++ServiceWorkerDataInfo::GetPrincipal(nsIPrincipal** aPrincipal)
++{
++  AssertIsOnMainThread();
++  NS_ADDREF(*aPrincipal = mPrincipal);
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++ServiceWorkerDataInfo::GetScope(nsAString& aScope)
++{
++  AssertIsOnMainThread();
++  aScope = mScope;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++ServiceWorkerDataInfo::GetScriptSpec(nsAString& aScriptSpec)
++{
++  AssertIsOnMainThread();
++  aScriptSpec = mScriptSpec;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++ServiceWorkerDataInfo::GetCurrentWorkerURL(nsAString& aCurrentWorkerURL)
++{
++  AssertIsOnMainThread();
++  aCurrentWorkerURL = mCurrentWorkerURL;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++ServiceWorkerDataInfo::GetActiveCacheName(nsAString& aActiveCacheName)
++{
++  AssertIsOnMainThread();
++  aActiveCacheName = mActiveCacheName;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++ServiceWorkerDataInfo::GetWaitingCacheName(nsAString& aWaitingCacheName)
++{
++  AssertIsOnMainThread();
++  aWaitingCacheName = mWaitingCacheName;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++ServiceWorkerManager::GetAllRegistrations(nsIArray** aResult)
++{
++  AssertIsOnMainThread();
++
++  nsRefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
++  MOZ_ASSERT(swr);
++
++  nsTArray<ServiceWorkerRegistrationData> data;
++  swr->GetRegistrations(data);
++
++  nsCOMPtr<nsIMutableArray> array(do_CreateInstance(NS_ARRAY_CONTRACTID));
++  if (!array) {
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++
++  for (uint32_t i = 0, len = data.Length(); i < len; ++i) {
++    nsCOMPtr<nsIServiceWorkerInfo> info = ServiceWorkerDataInfo::Create(data[i]);
++    if (!info) {
++      return NS_ERROR_FAILURE;
++    }
++
++    array->AppendElement(info, false);
++  }
++
++  array.forget(aResult);
++  return NS_OK;
++}
++
+ void
+ ServiceWorkerInfo::AppendWorker(ServiceWorker* aWorker)
+ {
+   MOZ_ASSERT(aWorker);
+ #ifdef DEBUG
+   nsAutoString workerURL;
+   aWorker->GetScriptURL(workerURL);
+   MOZ_ASSERT(workerURL.Equals(NS_ConvertUTF8toUTF16(mScriptSpec)));
+diff --git a/toolkit/content/aboutServiceWorkers.js b/toolkit/content/aboutServiceWorkers.js
+new file mode 100644
+--- /dev/null
++++ b/toolkit/content/aboutServiceWorkers.js
+@@ -0,0 +1,99 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++'use strict';
++
++const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
++
++Cu.import("resource://gre/modules/Services.jsm");
++
++const bundle = Services.strings.createBundle(
++  "chrome://global/locale/aboutServiceWorkers.properties");
++
++function init() {
++  let enabled = Services.prefs.getBoolPref("dom.serviceWorkers.enabled");
++  if (!enabled) {
++    let div = document.getElementById("warning_not_enabled");
++    div.classList.add("active");
++    return;
++  }
++
++  let swm = Cc["@mozilla.org/serviceworkers/manager;1"]
++              .getService(Ci.nsIServiceWorkerManager);
++  if (!swm) {
++    dump("AboutServiceWorkers: Failed to get the ServiceWorkerManager service!\n");
++    return;
++  }
++
++  let data = swm.getAllRegistrations();
++  if (!data) {
++    dump("AboutServiceWorkers: Failed to retrieve the registrations.\n");
++    return;
++  }
++
++  let length = data.length;
++  if (!length) {
++    let div = document.getElementById("warning_no_serviceworkers");
++    div.classList.add("active");
++    return;
++  }
++
++  for (let i = 0; i < length; ++i) {
++    let info = data.queryElementAt(i, Ci.nsIServiceWorkerInfo);
++    if (!info) {
++      dump("AboutServiceWorkers: Invalid nsIServiceWorkerInfo interface.\n");
++      continue;
++    }
++
++    display(info);
++  }
++}
++
++function display(info) {
++  let parent = document.getElementById("serviceworkers");
++
++  let div = document.createElement('div');
++  parent.appendChild(div);
++
++  let title = document.createElement('h2');
++  let titleStr = bundle.formatStringFromName('title', [info.principal.origin], 1);
++  title.appendChild(document.createTextNode(titleStr));
++  div.appendChild(title);
++
++  if (info.principal.appId) {
++    let b2gtitle = document.createElement('h3');
++    let trueFalse = bundle.GetStringFromName(info.principal.isInBrowserElement ? 'true' : 'false');
++    let b2gtitleStr = bundle.formatStringFromName('b2gtitle', [info.principal.appId, trueFalse], 2);
++    b2gtitle.appendChild(document.createTextNode(b2gtitleStr));
++    div.appendChild(b2gtitle);
++  }
++
++  let list = document.createElement('ul');
++  div.appendChild(list);
++
++  function createItem(title, value) {
++    let item = document.createElement('li');
++    list.appendChild(item);
++
++    let bold = document.createElement('strong');
++    bold.appendChild(document.createTextNode(title + " "));
++    item.appendChild(bold);
++
++    item.appendChild(document.createTextNode(value));
++  }
++
++  createItem(bundle.GetStringFromName('scope'), info.scope);
++  createItem(bundle.GetStringFromName('scriptSpec'), info.scriptSpec);
++  createItem(bundle.GetStringFromName('currentWorkerURL'), info.currentWorkerURL);
++  createItem(bundle.GetStringFromName('activeCacheName'), info.activeCacheName);
++  createItem(bundle.GetStringFromName('waitingCacheName'), info.waitingCacheName);
++
++  let sep = document.createElement('hr');
++  div.appendChild(sep);
++}
++
++window.addEventListener("DOMContentLoaded", function load() {
++  window.removeEventListener("DOMContentLoaded", load);
++  init();
++});
+diff --git a/toolkit/content/aboutServiceWorkers.xhtml b/toolkit/content/aboutServiceWorkers.xhtml
+new file mode 100644
+--- /dev/null
++++ b/toolkit/content/aboutServiceWorkers.xhtml
+@@ -0,0 +1,34 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++
++
++<!DOCTYPE html [
++<!ENTITY % htmlDTD PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "DTD/xhtml1-strict.dtd"> %htmlDTD;
++<!ENTITY % globalDTD SYSTEM "chrome://global/locale/global.dtd"> %globalDTD;
++<!ENTITY % brandDTD SYSTEM "chrome://branding/locale/brand.dtd"> %brandDTD;
++<!ENTITY % networkingDTD SYSTEM "chrome://global/locale/aboutServiceWorkers.dtd"> %networkingDTD;
++]>
++
++<html xmlns="http://www.w3.org/1999/xhtml">
++    <head>
++        <title>&aboutServiceWorkers.title;</title>
++        <link rel="stylesheet" href="chrome://global/skin/about.css" type="text/css" />
++        <link rel="stylesheet" href="chrome://mozapps/skin/aboutServiceWorkers.css" type="text/css" />
++        <script type="application/javascript;version=1.7" src="chrome://global/content/aboutServiceWorkers.js" />
++    </head>
++    <body id="body">
++        <div id="warning_not_enabled" class="warningBackground">
++            <div class="warningMessage">&aboutServiceWorkers.warning_not_enabled;</div>
++        </div>
++
++        <div id="warning_no_serviceworkers" class="warningBackground">
++            <div class="warningMessage">&aboutServiceWorkers.warning_no_serviceworkers;</div>
++        </div>
++
++        <div id="serviceworkers" class="tab active">
++          <h1>&aboutServiceWorkers.maintitle;</h1>
++        </div>
++    </body>
++</html>
+diff --git a/toolkit/content/aboutSupport.xhtml b/toolkit/content/aboutSupport.xhtml
+--- a/toolkit/content/aboutSupport.xhtml
++++ b/toolkit/content/aboutSupport.xhtml
+@@ -181,16 +181,26 @@
+               &aboutSupport.appBasicsMemoryUse;
+             </th>
+ 
+             <td>
+               <a href="about:memory">about:memory</a>
+             </td>
+           </tr>
+ 
++          <tr class="no-copy">
++            <th class="column">
++              &aboutSupport.appBasicsServiceWorkers;
++            </th>
++
++            <td>
++              <a href="about:serviceworkers">about:serviceworkers</a>
++            </td>
++          </tr>
++
+           <tr>
+             <th class="column">
+               &aboutSupport.appBasicsMultiProcessSupport;
+             </th>
+ 
+             <td id="multiprocess-box">
+             </td>
+           </tr>
+diff --git a/toolkit/content/jar.mn b/toolkit/content/jar.mn
+--- a/toolkit/content/jar.mn
++++ b/toolkit/content/jar.mn
+@@ -15,16 +15,18 @@ toolkit.jar:
+    content/global/about.js                    (about.js)
+    content/global/about.xhtml                 (about.xhtml)
+    content/global/aboutAbout.js               (aboutAbout.js)
+    content/global/aboutAbout.xhtml            (aboutAbout.xhtml)
+    content/global/aboutRights.xhtml           (aboutRights.xhtml)
+    content/global/aboutRights-unbranded.xhtml (aboutRights-unbranded.xhtml)
+    content/global/aboutNetworking.js
+    content/global/aboutNetworking.xhtml
++   content/global/aboutServiceWorkers.js
++   content/global/aboutServiceWorkers.xhtml
+    content/global/aboutwebrtc/aboutWebrtc.css   (aboutwebrtc/aboutWebrtc.css)
+    content/global/aboutwebrtc/aboutWebrtc.js    (aboutwebrtc/aboutWebrtc.js)
+    content/global/aboutwebrtc/aboutWebrtc.xhtml (aboutwebrtc/aboutWebrtc.xhtml)
+ *  content/global/aboutSupport.js
+ *  content/global/aboutSupport.xhtml
+ *  content/global/aboutTelemetry.js
+    content/global/aboutTelemetry.xhtml
+    content/global/aboutTelemetry.css          (aboutTelemetry.css)
+diff --git a/toolkit/locales/en-US/chrome/global/aboutServiceWorkers.dtd b/toolkit/locales/en-US/chrome/global/aboutServiceWorkers.dtd
+new file mode 100644
+--- /dev/null
++++ b/toolkit/locales/en-US/chrome/global/aboutServiceWorkers.dtd
+@@ -0,0 +1,8 @@
++<!-- This Source Code Form is subject to the terms of the Mozilla Public
++   - License, v. 2.0. If a copy of the MPL was not distributed with this
++   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
++
++<!ENTITY aboutServiceWorkers.title                     "About ServiceWorkers">
++<!ENTITY aboutServiceWorkers.maintitle                 "Registered ServiceWorkers">
++<!ENTITY aboutServiceWorkers.warning_not_enabled       "ServiceWorkers are not enabled.">
++<!ENTITY aboutServiceWorkers.warning_no_serviceworkers "No ServiceWorkers registered.">
+diff --git a/toolkit/locales/en-US/chrome/global/aboutServiceWorkers.properties b/toolkit/locales/en-US/chrome/global/aboutServiceWorkers.properties
+new file mode 100644
+--- /dev/null
++++ b/toolkit/locales/en-US/chrome/global/aboutServiceWorkers.properties
+@@ -0,0 +1,21 @@
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++title = Origin: %S
++
++b2gtitle = B2G AppID %S - InBrowserElement %S
++
++scope = Scope: 
++
++scriptSpec = Script Spec: 
++
++currentWorkerURL = Current Worker URL: 
++
++activeCacheName = Active Cache Name: 
++
++waitingCacheName = Waiting Cache Name: 
++
++true = true
++
++false = false
+diff --git a/toolkit/locales/en-US/chrome/global/aboutSupport.dtd b/toolkit/locales/en-US/chrome/global/aboutSupport.dtd
+--- a/toolkit/locales/en-US/chrome/global/aboutSupport.dtd
++++ b/toolkit/locales/en-US/chrome/global/aboutSupport.dtd
+@@ -50,16 +50,17 @@ This is likely the same like id.heading 
+ This is the Windows- and Mac-specific variant of aboutSupport.appBasicsProfileDir.
+ Windows/Mac use the term "Folder" instead of "Directory" -->
+ <!ENTITY aboutSupport.appBasicsProfileDirWinMac "Profile Folder">
+ 
+ <!ENTITY aboutSupport.appBasicsEnabledPlugins "Enabled Plugins">
+ <!ENTITY aboutSupport.appBasicsBuildConfig "Build Configuration">
+ <!ENTITY aboutSupport.appBasicsUserAgent "User Agent">
+ <!ENTITY aboutSupport.appBasicsMemoryUse "Memory Use">
++<!ENTITY aboutSupport.appBasicsServiceWorkers "Registered ServiceWorkers">
+ 
+ <!ENTITY aboutSupport.appBasicsMultiProcessSupport "Multiprocess Windows">
+ 
+ <!ENTITY aboutSupport.showDir.label "Open Directory">
+ <!-- LOCALIZATION NOTE (aboutSupport.showMac.label): This is the Mac-specific
+ variant of aboutSupport.showDir.label.  This allows us to use the preferred
+ "Finder" terminology on Mac. -->
+ <!ENTITY aboutSupport.showMac.label "Show in Finder">
+diff --git a/toolkit/locales/jar.mn b/toolkit/locales/jar.mn
+--- a/toolkit/locales/jar.mn
++++ b/toolkit/locales/jar.mn
+@@ -6,16 +6,18 @@
+ 
+ @AB_CD@.jar:
+ % locale global @AB_CD@ %locale/@AB_CD@/global/
+   locale/@AB_CD@/global/about.dtd                       (%chrome/global/about.dtd)
+   locale/@AB_CD@/global/aboutAbout.dtd                  (%chrome/global/aboutAbout.dtd)
+   locale/@AB_CD@/global/aboutReader.properties          (%chrome/global/aboutReader.properties)
+   locale/@AB_CD@/global/aboutRights.dtd                 (%chrome/global/aboutRights.dtd)
+   locale/@AB_CD@/global/aboutNetworking.dtd             (%chrome/global/aboutNetworking.dtd)
++  locale/@AB_CD@/global/aboutServiceWorkers.dtd         (%chrome/global/aboutServiceWorkers.dtd)
++  locale/@AB_CD@/global/aboutServiceWorkers.properties  (%chrome/global/aboutServiceWorkers.properties)
+   locale/@AB_CD@/global/aboutSupport.dtd                (%chrome/global/aboutSupport.dtd)
+   locale/@AB_CD@/global/aboutSupport.properties         (%chrome/global/aboutSupport.properties)
+   locale/@AB_CD@/global/aboutTelemetry.dtd              (%chrome/global/aboutTelemetry.dtd)
+   locale/@AB_CD@/global/aboutTelemetry.properties       (%chrome/global/aboutTelemetry.properties)
+   locale/@AB_CD@/global/aboutWebrtc.properties          (%chrome/global/aboutWebrtc.properties)
+   locale/@AB_CD@/global/autocomplete.properties         (%chrome/global/autocomplete.properties)
+   locale/@AB_CD@/global/appPicker.dtd                   (%chrome/global/appPicker.dtd)
+   locale/@AB_CD@/global/brand.dtd                       (generic/chrome/global/brand.dtd)
+diff --git a/toolkit/themes/osx/mozapps/jar.mn b/toolkit/themes/osx/mozapps/jar.mn
+--- a/toolkit/themes/osx/mozapps/jar.mn
++++ b/toolkit/themes/osx/mozapps/jar.mn
+@@ -51,16 +51,17 @@ toolkit.jar:
+ * skin/classic/mozapps/extensions/newaddon.css                    (extensions/newaddon.css)
+   skin/classic/mozapps/passwordmgr/key.png                        (passwordmgr/key.png)
+   skin/classic/mozapps/passwordmgr/key-16.png                     (passwordmgr/key-16.png)
+   skin/classic/mozapps/passwordmgr/key-16@2x.png                  (passwordmgr/key-16@2x.png)
+   skin/classic/mozapps/passwordmgr/key-64.png                     (passwordmgr/key-64.png)
+   skin/classic/mozapps/formautofill/requestAutocomplete.css       (../../shared/formautofill/requestAutocomplete.css)
+   skin/classic/mozapps/plugins/pluginProblem.css                  (../../shared/plugins/pluginProblem.css)
+   skin/classic/mozapps/aboutNetworking.css                        (../../shared/aboutNetworking.css)
++  skin/classic/mozapps/aboutServiceWorkers.css                    (../../shared/aboutServiceWorkers.css)
+   skin/classic/mozapps/plugins/contentPluginActivate.png          (../../shared/plugins/contentPluginActivate.png)
+   skin/classic/mozapps/plugins/contentPluginBlocked.png           (../../shared/plugins/contentPluginBlocked.png)
+   skin/classic/mozapps/plugins/contentPluginClose.png             (../../shared/plugins/contentPluginClose.png)
+   skin/classic/mozapps/plugins/contentPluginCrashed.png           (../../shared/plugins/contentPluginCrashed.png)
+   skin/classic/mozapps/plugins/contentPluginDisabled.png          (../../shared/plugins/contentPluginDisabled.png)
+   skin/classic/mozapps/plugins/contentPluginDownload.png          (../../shared/plugins/contentPluginDownload.png)
+   skin/classic/mozapps/plugins/contentPluginMissing.png           (../../shared/plugins/contentPluginMissing.png)
+   skin/classic/mozapps/plugins/contentPluginStripe.png            (../../shared/plugins/contentPluginStripe.png)
+diff --git a/toolkit/themes/shared/aboutServiceWorkers.css b/toolkit/themes/shared/aboutServiceWorkers.css
+new file mode 100644
+--- /dev/null
++++ b/toolkit/themes/shared/aboutServiceWorkers.css
+@@ -0,0 +1,40 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++body {
++  min-width: 330px;
++  max-width: 100%;
++  min-height: 330px;
++  max-height: 100%;
++}
++
++.warningBackground {
++  display: none;
++  background: -moz-Dialog;
++  width:100%;
++  height:100%;
++  z-index:10;
++  top:0;
++  left:0;
++  position:fixed;
++}
++
++.warningMessage {
++  color: -moz-FieldText;
++  position: relative;
++  min-width: 330px;
++  max-width: 50em;
++  margin: 4em auto;
++  border: 1px solid ThreeDShadow;
++  border-radius: 10px;
++  padding: 3em;
++  -moz-padding-start: 30px;
++  background: -moz-Field;
++  margin-left: auto;
++  text-align: center;
++}
++
++.active {
++  display: block;
++}
+diff --git a/toolkit/themes/windows/mozapps/jar.mn b/toolkit/themes/windows/mozapps/jar.mn
+--- a/toolkit/themes/windows/mozapps/jar.mn
++++ b/toolkit/themes/windows/mozapps/jar.mn
+@@ -50,16 +50,17 @@ toolkit.jar:
+         skin/classic/mozapps/passwordmgr/key-16.png                (passwordmgr/key-16.png)
+         skin/classic/mozapps/passwordmgr/key-64.png                (passwordmgr/key-64.png)
+ #ifdef MOZ_PLACES
+         skin/classic/mozapps/places/defaultFavicon.png             (places/defaultFavicon.png)
+ #endif
+         skin/classic/mozapps/formautofill/requestAutocomplete.css  (../../shared/formautofill/requestAutocomplete.css)
+         skin/classic/mozapps/plugins/pluginProblem.css             (../../shared/plugins/pluginProblem.css)
+         skin/classic/mozapps/aboutNetworking.css                   (../../shared/aboutNetworking.css)
++        skin/classic/mozapps/aboutServiceWorkers.css               (../../shared/aboutServiceWorkers.css)
+         skin/classic/mozapps/plugins/contentPluginActivate.png     (../../shared/plugins/contentPluginActivate.png)
+         skin/classic/mozapps/plugins/contentPluginBlocked.png      (../../shared/plugins/contentPluginBlocked.png)
+         skin/classic/mozapps/plugins/contentPluginClose.png        (../../shared/plugins/contentPluginClose.png)
+         skin/classic/mozapps/plugins/contentPluginCrashed.png      (../../shared/plugins/contentPluginCrashed.png)
+         skin/classic/mozapps/plugins/contentPluginDisabled.png     (../../shared/plugins/contentPluginDisabled.png)
+         skin/classic/mozapps/plugins/contentPluginDownload.png     (../../shared/plugins/contentPluginDownload.png)
+         skin/classic/mozapps/plugins/contentPluginMissing.png      (../../shared/plugins/contentPluginMissing.png)
+         skin/classic/mozapps/plugins/contentPluginStripe.png       (../../shared/plugins/contentPluginStripe.png)
