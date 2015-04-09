@@ -1,12 +1,30 @@
 # HG changeset patch
-# Parent 66e9dd7039bbb2f436c7bb10f44095686bd62f0c
+# Parent 6ebbea3849800a5225ff1b351b0cc71d11273399
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1115820 - Add telemetry to ServiceWorkers. r=nsm
 
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -985,16 +985,19 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -15,16 +15,17 @@
+ #include "nsINetworkInterceptController.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsScriptLoader.h"
+ #include "nsDebug.h"
+ 
+ #include "jsapi.h"
+ 
+ #include "mozilla/LoadContext.h"
++#include "mozilla/Telemetry.h"
+ #include "mozilla/dom/BindingUtils.h"
+ #include "mozilla/dom/DOMError.h"
+ #include "mozilla/dom/ErrorEvent.h"
+ #include "mozilla/dom/Headers.h"
+ #include "mozilla/dom/InstallEventBinding.h"
+ #include "mozilla/dom/InternalHeaders.h"
+ #include "mozilla/dom/Navigator.h"
+ #include "mozilla/dom/PromiseNativeHandler.h"
+@@ -994,16 +995,19 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    nsRefPtr<ServiceWorkerResolveWindowPromiseOnUpdateCallback> cb =
      new ServiceWorkerResolveWindowPromiseOnUpdateCallback(window, promise);
@@ -26,10 +44,28 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerManager::AppendPendingOperation(ServiceWorkerJobQueue* aQueue,
                                               ServiceWorkerJob* aJob)
  {
+@@ -1981,16 +1985,17 @@ ServiceWorkerManager::MaybeStartControll
+   nsRefPtr<ServiceWorkerRegistrationInfo> registration =
+     GetServiceWorkerRegistrationInfo(aDoc);
+   if (registration) {
+     MOZ_ASSERT(!mControlledDocuments.Contains(aDoc));
+     registration->StartControllingADocument();
+     // Use the already_AddRefed<> form of Put to avoid the addref-deref since
+     // we don't need the registration pointer in this function anymore.
+     mControlledDocuments.Put(aDoc, registration.forget());
++    Telemetry::Accumulate(Telemetry::SERVICE_WORKER_CONTROLLED_DOCUMENTS, 1);
+   }
+ }
+ 
+ void
+ ServiceWorkerManager::MaybeStopControlling(nsIDocument* aDoc)
+ {
+   MOZ_ASSERT(aDoc);
+   nsRefPtr<ServiceWorkerRegistrationInfo> registration;
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
-@@ -7951,10 +7951,15 @@
+@@ -7957,10 +7957,20 @@
      "expires_in_version": "50",
      "kind": "count",
      "description": "Count ServiceWorkers that really did get a thread created for them"
@@ -43,5 +79,10 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
 +    "expires_in_version": "50",
 +    "kind": "count",
 +    "description": "Count how many registrations occurs."
++  },
++  "SERVICE_WORKER_CONTROLLED_DOCUMENTS": {
++    "expires_in_version": "50",
++    "kind": "count",
++    "description": "Count whenever a document is controlled."
    }
  }

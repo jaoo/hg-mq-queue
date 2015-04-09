@@ -1,34 +1,12 @@
 # HG changeset patch
-# Parent f46b7295a968ebece44dc2044e64c84d97665cd1
+# Parent 6260f6652b39f3e5d9ae4d4ea3054e70bcf507de
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug XXXXXXX: Enable some prefs for testing. r=me
 
-diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
---- a/browser/app/profile/firefox.js
-+++ b/browser/app/profile/firefox.js
-@@ -1850,17 +1850,17 @@ pref("media.gmp-provider.enabled", true)
- pref("browser.apps.URL", "https://marketplace.firefox.com/discovery/");
- 
- #ifdef NIGHTLY_BUILD
- pref("browser.polaris.enabled", false);
- pref("privacy.trackingprotection.ui.enabled", false);
- #endif
- 
- #ifdef NIGHTLY_BUILD
--pref("browser.tabs.remote.autostart.1", true);
-+pref("browser.tabs.remote.autostart.1", false);
- #endif
- 
- #ifdef NIGHTLY_BUILD
- // Enable e10s add-on interposition by default.
- pref("extensions.interposition.enabled", true);
- pref("extensions.interposition.prefetching", true);
- #endif
- 
 diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
 --- a/modules/libpref/init/all.js
 +++ b/modules/libpref/init/all.js
-@@ -131,17 +131,20 @@ pref("dom.workers.maxPerDomain", 20);
+@@ -131,17 +131,17 @@ pref("dom.workers.maxPerDomain", 20);
  
  // Whether or not Shared Web Workers are enabled.
  pref("dom.workers.sharedWorkers.enabled", true);
@@ -39,9 +17,6 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // Service workers
 -pref("dom.serviceWorkers.enabled", false);
 +pref("dom.serviceWorkers.enabled", true);
-+
-+// Service workers testing
-+pref("dom.serviceWorkers.testing.enabled", true);
  
  // Whether nonzero values can be returned from performance.timing.*
  pref("dom.enable_performance", true);
@@ -50,7 +25,7 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  pref("dom.enable_resource_timing", true);
  
  // Enable high-resolution timing markers for users
-@@ -767,17 +770,17 @@ pref("toolkit.autocomplete.richBoundaryC
+@@ -767,17 +767,17 @@ pref("toolkit.autocomplete.richBoundaryC
  pref("toolkit.osfile.log", false);
  
  pref("toolkit.scrollbox.smoothScroll", true);
@@ -69,7 +44,7 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
  pref("toolkit.telemetry.debugSlowSql", false);
  
-@@ -790,17 +793,17 @@ pref("toolkit.asyncshutdown.timeout.cras
+@@ -790,17 +790,17 @@ pref("toolkit.asyncshutdown.timeout.cras
  
  // Enable deprecation warnings.
  pref("devtools.errorconsole.deprecation_warnings", true);
@@ -88,7 +63,7 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // Disable remote debugging connections
  #ifdef MOZ_DEV_EDITION
  pref("devtools.debugger.remote-enabled", true);
-@@ -1113,17 +1116,17 @@ pref("network.notify.changed", true);
+@@ -1113,17 +1113,17 @@ pref("network.notify.changed", true);
  
  // Transmit UDP busy-work to the LAN when anticipating low latency
  // network reads and on wifi to mitigate 802.11 Power Save Polling delays
@@ -107,22 +82,3 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // Prevent using external protocol handlers for these schemes
  pref("network.protocol-handler.external.hcp", false);
  pref("network.protocol-handler.external.vbscript", false);
-@@ -4492,17 +4495,17 @@ pref("beacon.enabled", true);
- #endif
- 
- // Camera prefs
- pref("camera.control.face_detection.enabled", true);
- 
- 
- // SW Cache API
- #ifdef RELEASE_BUILD
--pref("dom.caches.enabled", false);
-+pref("dom.caches.enabled", true);
- #else
- pref("dom.caches.enabled", true);
- #endif // RELEASE_BUILD
- 
- #ifdef MOZ_WIDGET_GONK
- // Empirically, this is the value returned by hal::GetTotalSystemMemory()
- // when Flame's memory is limited to 512MiB. If the camera stack determines
- // it is running on a low memory platform, features that can be reliably
