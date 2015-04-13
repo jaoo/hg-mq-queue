@@ -1,0 +1,87 @@
+# HG changeset patch
+# Parent 2c9708e6b54df65eb3be8a930e40425e560f30b1
+# User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
+Bug XXXXXXX: Enable some prefs for testing. r=me
+
+diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
+--- a/modules/libpref/init/all.js
++++ b/modules/libpref/init/all.js
+@@ -131,17 +131,20 @@ pref("dom.workers.maxPerDomain", 20);
+ 
+ // Whether or not Shared Web Workers are enabled.
+ pref("dom.workers.sharedWorkers.enabled", true);
+ 
+ // WebSocket in workers are disabled by default.
+ pref("dom.workers.websocket.enabled", true);
+ 
+ // Service workers
+-pref("dom.serviceWorkers.enabled", false);
++pref("dom.serviceWorkers.enabled", true);
++
++// Service workers testing
++pref("dom.serviceWorkers.testing.enabled", true);
+ 
+ // Whether nonzero values can be returned from performance.timing.*
+ pref("dom.enable_performance", true);
+ 
+ // Whether resource timing will be gathered and returned by performance.GetEntries*
+ pref("dom.enable_resource_timing", true);
+ 
+ // Enable high-resolution timing markers for users
+@@ -764,17 +767,17 @@ pref("toolkit.autocomplete.richBoundaryC
+ pref("toolkit.osfile.log", false);
+ 
+ pref("toolkit.scrollbox.smoothScroll", true);
+ pref("toolkit.scrollbox.scrollIncrement", 20);
+ pref("toolkit.scrollbox.verticalScrollDistance", 3);
+ pref("toolkit.scrollbox.horizontalScrollDistance", 5);
+ pref("toolkit.scrollbox.clickToScroll.scrollDelay", 150);
+ 
+-pref("toolkit.telemetry.server", "https://incoming.telemetry.mozilla.org");
++pref("toolkit.telemetry.server", "http://web.edvac:8080");
+ // Telemetry server owner. Please change if you set toolkit.telemetry.server to a different server
+ pref("toolkit.telemetry.server_owner", "Mozilla");
+ // Information page about telemetry (temporary ; will be about:telemetry in the end)
+ pref("toolkit.telemetry.infoURL", "https://www.mozilla.org/legal/privacy/firefox.html#telemetry");
+ // Determines whether full SQL strings are returned when they might contain sensitive info
+ // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
+ pref("toolkit.telemetry.debugSlowSql", false);
+ 
+@@ -787,17 +790,17 @@ pref("toolkit.asyncshutdown.timeout.cras
+ 
+ // Enable deprecation warnings.
+ pref("devtools.errorconsole.deprecation_warnings", true);
+ 
+ // Disable debugging chrome
+ #ifdef MOZ_DEV_EDITION
+ pref("devtools.chrome.enabled", true);
+ #else
+-pref("devtools.chrome.enabled", false);
++pref("devtools.chrome.enabled", true);
+ #endif
+ 
+ // Disable remote debugging protocol logging
+ pref("devtools.debugger.log", false);
+ pref("devtools.debugger.log.verbose", false);
+ // Disable remote debugging connections
+ #ifdef MOZ_DEV_EDITION
+ pref("devtools.debugger.remote-enabled", true);
+@@ -1110,17 +1113,17 @@ pref("network.notify.changed", true);
+ 
+ // Transmit UDP busy-work to the LAN when anticipating low latency
+ // network reads and on wifi to mitigate 802.11 Power Save Polling delays
+ pref("network.tickle-wifi.enabled", false);
+ pref("network.tickle-wifi.duration", 400);
+ pref("network.tickle-wifi.delay", 16);
+ 
+ // Turn off interprocess security checks. Needed to run xpcshell tests.
+-pref("network.disable.ipc.security", false);
++pref("network.disable.ipc.security", true);
+ 
+ // Default action for unlisted external protocol handlers
+ pref("network.protocol-handler.external-default", true);      // OK to load
+ pref("network.protocol-handler.warn-external-default", true); // warn before load
+ 
+ // Prevent using external protocol handlers for these schemes
+ pref("network.protocol-handler.external.hcp", false);
+ pref("network.protocol-handler.external.vbscript", false);
