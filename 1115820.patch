@@ -1,13 +1,57 @@
 # HG changeset patch
-# Parent 6ebbea3849800a5225ff1b351b0cc71d11273399
+# Parent 32bbead4607c776ed5e5f9c0acc62234c0170364
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1115820 - Add telemetry to ServiceWorkers. r=nsm
 
+diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
+--- a/dom/workers/RuntimeService.cpp
++++ b/dom/workers/RuntimeService.cpp
+@@ -1602,16 +1602,17 @@ RuntimeService::RegisterWorker(JSContext
+   }
+ 
+   if (!queued && !ScheduleWorker(aCx, aWorkerPrivate)) {
+     return false;
+   }
+ 
+   if (isServiceWorker) {
+     AssertIsOnMainThread();
++    aWorkerPrivate->SetSpawnTimeStamp(TimeStamp::Now());
+     Telemetry::Accumulate(Telemetry::SERVICE_WORKER_WAS_SPAWNED, 1);
+   }
+   return true;
+ }
+ 
+ void
+ RuntimeService::UnregisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+ {
+@@ -1684,16 +1685,22 @@ RuntimeService::UnregisterWorker(JSConte
+     }
+ 
+     if (!domainInfo->ActiveWorkerCount()) {
+       MOZ_ASSERT(domainInfo->mQueuedWorkers.IsEmpty());
+       mDomainMap.Remove(domain);
+     }
+   }
+ 
++  if (aWorkerPrivate->IsServiceWorker()) {
++    AssertIsOnMainThread();
++    Telemetry::AccumulateTimeDelta(Telemetry::SERVICE_WORKER_STAYS_ALIVE,
++                                   aWorkerPrivate->SpawnTimeStamp());
++  }
++  
+   if (aWorkerPrivate->IsSharedWorker()) {
+     AssertIsOnMainThread();
+ 
+     nsAutoTArray<nsRefPtr<SharedWorker>, 5> sharedWorkersToNotify;
+     aWorkerPrivate->GetAllSharedWorkers(sharedWorkersToNotify);
+ 
+     for (uint32_t index = 0; index < sharedWorkersToNotify.Length(); index++) {
+       MOZ_ASSERT(sharedWorkersToNotify[index]);
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -15,16 +15,17 @@
- #include "nsINetworkInterceptController.h"
+@@ -16,16 +16,17 @@
+ #include "nsIMutableArray.h"
  #include "nsPIDOMWindow.h"
  #include "nsScriptLoader.h"
  #include "nsDebug.h"
@@ -24,7 +68,27 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  #include "mozilla/dom/InternalHeaders.h"
  #include "mozilla/dom/Navigator.h"
  #include "mozilla/dom/PromiseNativeHandler.h"
-@@ -994,16 +995,19 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -600,16 +601,19 @@ public:
+     }
+ 
+     if (aInCacheAndEqual) {
+       Succeed();
+       Done(NS_OK);
+       return;
+     }
+ 
++    AssertIsOnMainThread();
++    Telemetry::Accumulate(Telemetry::SERVICE_WORKER_NOT_IN_CACHE, 1);
++
+     nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+ 
+     // FIXME: Bug 1130101 - Read max scope from Service-Worker-Allowed header.
+     nsAutoCString allowedPrefix;
+     nsresult rv = GetRequiredScopeStringPrefix(mRegistration->mScriptSpec, allowedPrefix);
+     if (NS_WARN_IF(NS_FAILED(rv))) {
+       Fail(NS_ERROR_DOM_SECURITY_ERR);
+       return;
+@@ -995,16 +999,19 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    nsRefPtr<ServiceWorkerResolveWindowPromiseOnUpdateCallback> cb =
      new ServiceWorkerResolveWindowPromiseOnUpdateCallback(window, promise);
@@ -44,7 +108,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerManager::AppendPendingOperation(ServiceWorkerJobQueue* aQueue,
                                               ServiceWorkerJob* aJob)
  {
-@@ -1981,16 +1985,17 @@ ServiceWorkerManager::MaybeStartControll
+@@ -1982,16 +1989,17 @@ ServiceWorkerManager::MaybeStartControll
    nsRefPtr<ServiceWorkerRegistrationInfo> registration =
      GetServiceWorkerRegistrationInfo(aDoc);
    if (registration) {
@@ -62,10 +126,60 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  {
    MOZ_ASSERT(aDoc);
    nsRefPtr<ServiceWorkerRegistrationInfo> registration;
+diff --git a/dom/workers/WorkerPrivate.h b/dom/workers/WorkerPrivate.h
+--- a/dom/workers/WorkerPrivate.h
++++ b/dom/workers/WorkerPrivate.h
+@@ -184,16 +184,17 @@ private:
+   uint64_t mMessagePortSerial;
+   Status mParentStatus;
+   bool mParentFrozen;
+   bool mIsChromeWorker;
+   bool mMainThreadObjectsForgotten;
+   WorkerType mWorkerType;
+   TimeStamp mCreationTimeStamp;
+   TimeStamp mNowBaseTimeStamp;
++  TimeStamp mSpawnTimeStamp;
+ 
+ protected:
+   // The worker is owned by its thread, which is represented here.  This is set
+   // in Construct() and emptied by WorkerFinishedRunnable, and conditionally
+   // traversed by the cycle collector if the busy count is zero.
+   nsRefPtr<WorkerPrivate> mSelfRef;
+ 
+   WorkerPrivateParent(JSContext* aCx, WorkerPrivate* aParent,
+@@ -519,16 +520,28 @@ public:
+     return mCreationTimeStamp;
+   }
+ 
+   TimeStamp NowBaseTimeStamp() const
+   {
+     return mNowBaseTimeStamp;
+   }
+ 
++  TimeStamp SpawnTimeStamp() const
++  {
++    return mSpawnTimeStamp;
++  }
++
++  void
++  SetSpawnTimeStamp(TimeStamp aSpawnTimeStamp)
++  {
++    MOZ_ASSERT(IsServiceWorker());
++    mSpawnTimeStamp = aSpawnTimeStamp;
++  }
++
+   nsIPrincipal*
+   GetPrincipal() const
+   {
+     AssertIsOnMainThread();
+     return mLoadInfo.mPrincipal;
+   }
+ 
+   nsILoadGroup*
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
-@@ -7957,10 +7957,20 @@
+@@ -7964,10 +7964,32 @@
      "expires_in_version": "50",
      "kind": "count",
      "description": "Count ServiceWorkers that really did get a thread created for them"
@@ -84,5 +198,17 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
 +    "expires_in_version": "50",
 +    "kind": "count",
 +    "description": "Count whenever a document is controlled."
++  },
++  "SERVICE_WORKER_NOT_IN_CACHE": {
++    "expires_in_version": "50",
++    "kind": "boolean",
++    "description": "Count ServiceWorkers scripts that are not in the cache whenever there is a registration."
++  },
++  "SERVICE_WORKER_STAYS_ALIVE": {
++    "expires_in_version": "50",
++    "kind": "exponential",
++    "high": "5000",
++    "n_buckets": 20,
++    "description": "Tracking how long a ServiceWorker stays alive after it is spawned"
    }
  }
