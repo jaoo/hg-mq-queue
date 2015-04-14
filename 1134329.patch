@@ -1,12 +1,12 @@
 # HG changeset patch
-# Parent 078128c2600a0c695f8a16bf561b171a523daedd
+# Parent 2c9708e6b54df65eb3be8a930e40425e560f30b1
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm,miker
 
 diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
 --- a/browser/app/profile/firefox.js
 +++ b/browser/app/profile/firefox.js
-@@ -1448,16 +1448,19 @@ pref("devtools.performance.ui.enable-fra
+@@ -1443,16 +1443,19 @@ pref("devtools.performance.ui.enable-fra
  pref("devtools.performance.ui.show-jit-optimizations", false);
  
  // The default cache UI setting
@@ -122,12 +122,26 @@ rename to browser/devtools/framework/test/browser_toolbox_options_serviceworkers
    // Note: Pref dom.serviceWorkers.testing.enabled is false since we are testing
    // the same capabilities are enabled with the devtool pref.
    SpecialPowers.pushPrefEnv({"set": [
-@@ -59,66 +64,132 @@ function testRegisterFails() {
+@@ -50,75 +55,142 @@ function testRegisterFails() {
+     is(output.textContent,
+        "SecurityError",
+        "SecurityError expected");
+     testRegisterInstallingWorker();
+   }
  
-   button.addEventListener('click', function onClick() {
-     button.removeEventListener('click', onClick);
+   if (output.textContent !== "No output") {
      doTheCheck();
-   });
++  } else {
++    button.addEventListener('click', function onClick() {
++      button.removeEventListener('click', onClick);
++      doTheCheck();
++    });
+   }
+-
+-  button.addEventListener('click', function onClick() {
+-    button.removeEventListener('click', onClick);
+-    doTheCheck();
+-  });
  }
  
  function testRegisterInstallingWorker() {
@@ -147,12 +161,17 @@ rename to browser/devtools/framework/test/browser_toolbox_options_serviceworkers
  
      if (output.textContent !== "No output") {
        doTheCheck();
++    } else {
++      button.addEventListener('click', function onClick() {
++        button.removeEventListener('click', onClick);
++        doTheCheck();
++      });
      }
- 
-     button.addEventListener('click', function onClick() {
-       button.removeEventListener('click', onClick);
-       doTheCheck();
-     });
+-
+-    button.addEventListener('click', function onClick() {
+-      button.removeEventListener('click', onClick);
+-      doTheCheck();
+-    });
    });
  }
  
@@ -173,11 +192,12 @@ rename to browser/devtools/framework/test/browser_toolbox_options_serviceworkers
 +
 +    if (output.textContent !== "No output") {
 +      doTheCheck();
++    } else {
++      button.addEventListener('click', function onClick() {
++        button.removeEventListener('click', onClick);
++        doTheCheck();
++      });
 +    }
-+    button.addEventListener('click', function onClick() {
-+      button.addEventListener('click', onClick);
-+      doTheCheck();
-+    });
 +  });
 +}
 +
@@ -199,12 +219,12 @@ rename to browser/devtools/framework/test/browser_toolbox_options_serviceworkers
 +
 +    if (output.textContent !== "No output") {
 +      doTheCheck();
++    } else {
++      button.addEventListener('click', function onClick() {
++        button.removeEventListener('click', onClick);
++        doTheCheck();
++      });
 +    }
-+
-+    button.addEventListener('click', function onClick() {
-+      button.addEventListener('click', onClick);
-+      doTheCheck();
-+    });
 +  });
 +}
 +
@@ -316,8 +336,8 @@ diff --git a/browser/devtools/framework/toolbox-options.xul b/browser/devtools/f
                      label="&options.disableJavaScript.label;"
                      tooltiptext="&options.disableJavaScript.tooltip;"/>
            <checkbox id="devtools-enable-serviceWorkersTesting"
-                     label="&options.enableServiceWorkersTesting.label;"
-                     tooltiptext="&options.enableServiceWorkersTesting.tooltip;"
+                     label="&options.enableServiceWorkersHTTP.label;"
+                     tooltiptext="&options.enableServiceWorkersHTTP.tooltip;"
                      data-pref="devtools.serviceWorkers.testing.enabled"/>
 +          <checkbox id="devtools-serviceWorkers-forceUpdateOnRegistration"
 +                    label="&options.serviceWorkersForceUpdateOnRegistration.label;"
@@ -432,16 +452,16 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
 @@ -98,16 +98,22 @@
  <!ENTITY options.disableCache.tooltip2   "Turning this option on will disable the cache for all tabs that have the toolbox open.">
  
- <!-- LOCALIZATION NOTE (options.enableServiceWorkersTesting.label,
-   -  options.enableServiceWorkersTesting.tooltip): This is the options panel label and
-   -  tooltip for the checkbox that toggles the service workers testing features on or off. -->
- <!ENTITY options.enableServiceWorkersTesting.label     "Enable Service Workers testing features (when toolbox is open)">
- <!ENTITY options.enableServiceWorkersTesting.tooltip   "Turning this option on will enable the service workers testing features for all tabs that have the toolbox open.">
+ <!-- LOCALIZATION NOTE (options.enableServiceWorkersHTTP.label,
+   -  options.enableServiceWorkersHTTP.tooltip): This is the options panel label and
+   -  tooltip for the checkbox that toggles the service workers testing features on or off. This option enables service workers over HTTP. -->
+ <!ENTITY options.enableServiceWorkersHTTP.label     "Enable Service Workers over HTTP (when toolbox is open)">
+ <!ENTITY options.enableServiceWorkersHTTP.tooltip   "Turning this option on will enable the service workers over HTTP for all tabs that have the toolbox open.">
  
 +<!-- LOCALIZATION NOTE (options.serviceWorkersForceUpdateOnRegistration.label,
 +  -  options.serviceWorkersForceUpdateOnRegistration.tooltip): This is the options panel label and
 +  -  tooltip for the checkbox that toggles on or off the force update on registration flag for service workers. -->
-+<!ENTITY options.serviceWorkersForceUpdateOnRegistration.label     "Force service workers to be update on registration (when toolbox is open)">
++<!ENTITY options.serviceWorkersForceUpdateOnRegistration.label     "Force Service Workers to be update on registration (when toolbox is open)">
 +<!ENTITY options.serviceWorkersForceUpdateOnRegistration.tooltip   "Turning this option on will force the update of the service workers on registration for all tabs that have the toolbox open.">
 +
  <!-- LOCALIZATION NOTE (options.selectDefaultTools.label): This is the label for
@@ -501,7 +521,7 @@ diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
 --- a/dom/base/nsGlobalWindow.cpp
 +++ b/dom/base/nsGlobalWindow.cpp
-@@ -579,17 +579,18 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWind
+@@ -580,17 +580,18 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWind
    mMayHavePointerEnterLeaveEventListener(false),
    mIsModalContentWindow(false),
    mIsActive(false), mIsBackground(false),
@@ -622,7 +642,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -510,16 +510,17 @@ class ServiceWorkerRegisterJob final : p
+@@ -511,16 +511,17 @@ class ServiceWorkerRegisterJob final : p
    friend class ContinueInstallTask;
  
    nsCString mScope;
@@ -640,7 +660,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
    {
      REGISTER_JOB = 0,
      UPDATE_JOB = 1,
-@@ -528,22 +529,24 @@ class ServiceWorkerRegisterJob final : p
+@@ -529,22 +530,24 @@ class ServiceWorkerRegisterJob final : p
  public:
    NS_DECL_ISUPPORTS_INHERITED
  
@@ -666,7 +686,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
                             ServiceWorkerRegistrationInfo* aRegistration,
                             ServiceWorkerUpdateFinishCallback* aCallback)
      : ServiceWorkerJob(aQueue)
-@@ -565,17 +568,18 @@ public:
+@@ -566,17 +569,18 @@ public:
        return;
      }
  
@@ -686,7 +706,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
          }
        } else {
          mRegistration = swm->CreateNewRegistration(mScope, mPrincipal);
-@@ -890,16 +894,18 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -891,16 +895,18 @@ ServiceWorkerManager::Register(nsIDOMWin
    // ServiceWorkers.
    MOZ_ASSERT(!nsContentUtils::IsCallerChrome());
  
@@ -705,7 +725,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
    nsCOMPtr<nsIURI> documentURI = doc->GetBaseURI();
  
-@@ -991,17 +997,22 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -992,17 +998,22 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    ServiceWorkerJobQueue* queue = GetOrCreateJobQueue(cleanedScope);
    MOZ_ASSERT(queue);
