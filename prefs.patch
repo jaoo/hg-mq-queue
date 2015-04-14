@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 2c9708e6b54df65eb3be8a930e40425e560f30b1
+# Parent 7f343964210b9d8ebaeff095752d039025e42e12
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug XXXXXXX: Enable some prefs for testing. r=me
 
@@ -46,8 +46,8 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // Determines whether full SQL strings are returned when they might contain sensitive info
  // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
  pref("toolkit.telemetry.debugSlowSql", false);
- 
-@@ -787,17 +790,17 @@ pref("toolkit.asyncshutdown.timeout.cras
+ // Determines if Telemetry pings can be archived locally.
+@@ -789,17 +792,17 @@ pref("toolkit.asyncshutdown.timeout.cras
  
  // Enable deprecation warnings.
  pref("devtools.errorconsole.deprecation_warnings", true);
@@ -66,7 +66,7 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // Disable remote debugging connections
  #ifdef MOZ_DEV_EDITION
  pref("devtools.debugger.remote-enabled", true);
-@@ -1110,17 +1113,17 @@ pref("network.notify.changed", true);
+@@ -1112,17 +1115,17 @@ pref("network.notify.changed", true);
  
  // Transmit UDP busy-work to the LAN when anticipating low latency
  // network reads and on wifi to mitigate 802.11 Power Save Polling delays
