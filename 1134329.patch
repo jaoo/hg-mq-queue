@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 2c9708e6b54df65eb3be8a930e40425e560f30b1
+# Parent df34731ae8a15fc032ca880840f024ed44c1f7af
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm,miker
 
@@ -286,7 +286,7 @@ rename from browser/devtools/framework/test/serviceworker.js
 rename to browser/devtools/framework/test/serviceworker.sjs
 --- a/browser/devtools/framework/test/serviceworker.js
 +++ b/browser/devtools/framework/test/serviceworker.sjs
-@@ -1,1 +1,39 @@
+@@ -1,1 +1,36 @@
 -// empty service worker, always succeed!
 +/* Any copyright is dedicated to the Public Domain.
 + * http://creativecommons.org/publicdomain/zero/1.0/ */
@@ -305,11 +305,8 @@ rename to browser/devtools/framework/test/serviceworker.sjs
 +  // byte-for-byte from the previously script returned.
 +  let serviceWorkers = [
 +    "// empty service worker for testing installing worker",
-+    "// empty service worker for testing installing worker",
-+    "// empty service worker for testing active worker",
 +    "// empty service worker for testing active worker",
 +    "// empty service worker for testing waiting worker",
-+    "// empty service worker for testing waiting worker"
 +  ];
 +  let index = parseInt(getState("index")) || 0;
 +
@@ -475,7 +472,7 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
 diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 --- a/dom/base/nsDOMWindowUtils.cpp
 +++ b/dom/base/nsDOMWindowUtils.cpp
-@@ -4006,16 +4006,42 @@ nsDOMWindowUtils::GetServiceWorkersTesti
+@@ -4029,16 +4029,42 @@ nsDOMWindowUtils::GetServiceWorkersTesti
    nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
    NS_ENSURE_STATE(window);
  
@@ -597,16 +594,16 @@ diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
 diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsIDOMWindowUtils.idl
 --- a/dom/interfaces/base/nsIDOMWindowUtils.idl
 +++ b/dom/interfaces/base/nsIDOMWindowUtils.idl
-@@ -45,17 +45,17 @@ interface nsIFile;
- interface nsIDOMClientRect;
+@@ -46,17 +46,17 @@ interface nsIDOMClientRect;
  interface nsIURI;
  interface nsIDOMEventTarget;
  interface nsIRunnable;
  interface nsITranslationNodeList;
  interface nsIJSRAIIHelper;
  interface nsIContentPermissionRequest;
+ interface nsIObserver;
  
--[scriptable, uuid(7f2f44ab-2857-4cc2-8c9d-3d9816f5a4d6)]
+-[scriptable, uuid(7ecfd6e7-120a-4567-85f7-14277f4c6d9f)]
 +[scriptable, uuid(e97634c8-9abf-4a54-ac72-5c09ef130207)]
  interface nsIDOMWindowUtils : nsISupports {
  
@@ -616,7 +613,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
     * to the given value. That is, when set to kDontAnimMode, all images
     * will stop animating. The attribute's value must be one of the
     * animationMode values from imgIContainer.
-@@ -1757,16 +1757,22 @@ interface nsIDOMWindowUtils : nsISupport
+@@ -1785,16 +1785,22 @@ interface nsIDOMWindowUtils : nsISupport
                         in int32_t aRight,
                         in int32_t aBottom,
                         in int32_t aLeft);
@@ -706,7 +703,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
          }
        } else {
          mRegistration = swm->CreateNewRegistration(mScope, mPrincipal);
-@@ -891,16 +895,18 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -885,16 +889,18 @@ ServiceWorkerManager::Register(nsIDOMWin
    // ServiceWorkers.
    MOZ_ASSERT(!nsContentUtils::IsCallerChrome());
  
@@ -725,7 +722,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
    nsCOMPtr<nsIURI> documentURI = doc->GetBaseURI();
  
-@@ -992,17 +998,22 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -986,17 +992,22 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    ServiceWorkerJobQueue* queue = GetOrCreateJobQueue(cleanedScope);
    MOZ_ASSERT(queue);
