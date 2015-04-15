@@ -1,0 +1,29 @@
+diff -r af90f2e0dbae -r 89f2f6e2e5d5 dom/workers/ScriptLoader.cpp
+--- a/dom/workers/ScriptLoader.cpp	Wed Apr 08 16:04:12 2015 -0700
++++ b/dom/workers/ScriptLoader.cpp	Fri Apr 10 14:14:44 2015 -0700
+@@ -1004,16 +1004,25 @@ private:
+     if (NS_SUCCEEDED(rv) && IsMainWorkerScript()) {
+       nsCOMPtr<nsIURI> finalURI;
+       rv = NS_NewURI(getter_AddRefs(finalURI), loadInfo.mFullURL, nullptr, nullptr);
+       if (NS_SUCCEEDED(rv)) {
+         mWorkerPrivate->SetBaseURI(finalURI);
+       }
+     }
+ 
++    if (IsMainWorkerScript()) {
++      nsIPrincipal* principal = mWorkerPrivate->GetPrincipal();
++      MOZ_ASSERT(principal);
++      nsILoadGroup* loadGroup = mWorkerPrivate->GetLoadGroup();
++      MOZ_ASSERT(loadGroup);
++      // Needed to initialize the principal info. This is fine because
++      mWorkerPrivate->SetPrincipal(principal, loadGroup);
++    }
++
+     if (NS_SUCCEEDED(rv)) {
+       DataReceived();
+     }
+ 
+     LoadingFinished(aIndex, rv);
+   }
+ 
+   void
