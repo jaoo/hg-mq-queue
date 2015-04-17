@@ -1,12 +1,12 @@
 # HG changeset patch
-# Parent 6260f6652b39f3e5d9ae4d4ea3054e70bcf507de
+# Parent 51e3cb11a258b9f22dfcdbf89ac99d1c56a1125e
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug XXXXXXX: Enable some prefs for testing. r=me
 
 diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
 --- a/modules/libpref/init/all.js
 +++ b/modules/libpref/init/all.js
-@@ -131,17 +131,17 @@ pref("dom.workers.maxPerDomain", 20);
+@@ -131,17 +131,20 @@ pref("dom.workers.maxPerDomain", 20);
  
  // Whether or not Shared Web Workers are enabled.
  pref("dom.workers.sharedWorkers.enabled", true);
@@ -17,6 +17,9 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // Service workers
 -pref("dom.serviceWorkers.enabled", false);
 +pref("dom.serviceWorkers.enabled", true);
++
++// Service worker testing
++pref("dom.serviceWorkers.testing.enabled", true);
  
  // Whether nonzero values can be returned from performance.timing.*
  pref("dom.enable_performance", true);
@@ -25,7 +28,7 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  pref("dom.enable_resource_timing", true);
  
  // Enable high-resolution timing markers for users
-@@ -767,17 +767,17 @@ pref("toolkit.autocomplete.richBoundaryC
+@@ -764,17 +767,17 @@ pref("toolkit.autocomplete.richBoundaryC
  pref("toolkit.osfile.log", false);
  
  pref("toolkit.scrollbox.smoothScroll", true);
@@ -44,7 +47,7 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
  pref("toolkit.telemetry.debugSlowSql", false);
  
-@@ -790,17 +790,17 @@ pref("toolkit.asyncshutdown.timeout.cras
+@@ -787,17 +790,17 @@ pref("toolkit.asyncshutdown.timeout.cras
  
  // Enable deprecation warnings.
  pref("devtools.errorconsole.deprecation_warnings", true);
@@ -63,7 +66,7 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // Disable remote debugging connections
  #ifdef MOZ_DEV_EDITION
  pref("devtools.debugger.remote-enabled", true);
-@@ -1113,17 +1113,17 @@ pref("network.notify.changed", true);
+@@ -1110,17 +1113,17 @@ pref("network.notify.changed", true);
  
  // Transmit UDP busy-work to the LAN when anticipating low latency
  // network reads and on wifi to mitigate 802.11 Power Save Polling delays
