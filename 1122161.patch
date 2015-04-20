@@ -1,12 +1,12 @@
 # HG changeset patch
-# Parent 4fe763cbe1961059f9051084afb6e300c6bf399f
+# Parent 50b95032152c1043d8dd7b8ffeb1051564466503
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1122161 - Redirected channels should respect skip service worker flag. r=nsm
 
 diff --git a/dom/workers/test/serviceworkers/fetch/fetch_tests.js b/dom/workers/test/serviceworkers/fetch/fetch_tests.js
 --- a/dom/workers/test/serviceworkers/fetch/fetch_tests.js
 +++ b/dom/workers/test/serviceworkers/fetch/fetch_tests.js
-@@ -105,16 +105,35 @@ fetchXHR('hello-after-extracting.gz', fu
+@@ -118,16 +118,35 @@ fetchXHR('hello-after-extracting.gz', fu
  });
  
  fetchXHR('http://example.com/tests/dom/base/test/file_CrossSiteXHR_server.sjs?status=200&allowOrigin=*', function(xhr) {
@@ -45,8 +45,7 @@ diff --git a/dom/workers/test/serviceworkers/fetch/fetch_tests.js b/dom/workers/
 diff --git a/dom/workers/test/serviceworkers/fetch_event_worker.js b/dom/workers/test/serviceworkers/fetch_event_worker.js
 --- a/dom/workers/test/serviceworkers/fetch_event_worker.js
 +++ b/dom/workers/test/serviceworkers/fetch_event_worker.js
-@@ -154,10 +154,24 @@ onfetch = function(ev) {
-                                          "message: 'reload status should be indicated'}, '*');" +
+@@ -167,9 +167,29 @@ onfetch = function(ev) {
                       "opener.postMessage({status: 'done'}, '*');" +
                     "</script>";
          ev.respondWith(new Response(body, {headers: {'Content-Type': 'text/html'}}));
@@ -54,20 +53,26 @@ diff --git a/dom/workers/test/serviceworkers/fetch_event_worker.js b/dom/workers
        seenIndex = true;
        ev.respondWith(fetch(ev.request.url));
      }
-+  } else if (ev.request.url.contains('something.txt')) {
+   }
+-}
++
++  else if (ev.request.url.contains('something.txt')) {
 +    ev.respondWith(Promise.resolve(
 +      Response.redirect('fetch/somethingelse.txt')
 +    ));
-+  } else if (ev.request.url.contains('somethingelse.txt')) {
++  }
++
++  else if (ev.request.url.contains('somethingelse.txt')) {
 +    ev.respondWith(Promise.resolve(
 +      new Response('something else response body', {})
 +    ));
-+  } else if (ev.request.url.contains('redirect_serviceworker.sjs')) {
++  }
++
++  else if (ev.request.url.contains('redirect_serviceworker.sjs')) {
 +    // The redirect_serviceworker.sjs server-side JavaScript file redirects to
 +    // 'http://mochi.test:8888/tests/dom/workers/test/serviceworkers/worker.js'
 +    // The redirected fetch should not go through the SW since the original
 +    // fetch was initiated from a SW.
 +    ev.respondWith(fetch('redirect_serviceworker.sjs'));
-   }
--}
++  }
 +};
