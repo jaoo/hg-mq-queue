@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 7432d40853dc0abaf57fc94c1b0a81f817568f0f
+# Parent 60952cf7e04f73a4e4cdd006e2ec0d50e10ca29c
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1115820 - Add telemetry to ServiceWorkers. r=nsm
 
@@ -50,7 +50,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  #include "mozilla/dom/InternalHeaders.h"
  #include "mozilla/dom/Navigator.h"
  #include "mozilla/dom/PromiseNativeHandler.h"
-@@ -600,16 +601,19 @@ public:
+@@ -602,16 +603,19 @@ public:
      }
  
      if (aInCacheAndEqual) {
@@ -70,7 +70,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      if (NS_WARN_IF(NS_FAILED(rv))) {
        Fail(NS_ERROR_DOM_SECURITY_ERR);
        return;
-@@ -995,16 +999,19 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -997,16 +1001,19 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    nsRefPtr<ServiceWorkerResolveWindowPromiseOnUpdateCallback> cb =
      new ServiceWorkerResolveWindowPromiseOnUpdateCallback(window, promise);
@@ -90,7 +90,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerManager::AppendPendingOperation(ServiceWorkerJobQueue* aQueue,
                                               ServiceWorkerJob* aJob)
  {
-@@ -2148,16 +2155,17 @@ ServiceWorkerManager::MaybeStartControll
+@@ -2150,16 +2157,17 @@ ServiceWorkerManager::MaybeStartControll
    nsRefPtr<ServiceWorkerRegistrationInfo> registration =
      GetServiceWorkerRegistrationInfo(aDoc);
    if (registration) {
@@ -111,7 +111,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
-@@ -7974,10 +7974,32 @@
+@@ -7975,10 +7975,32 @@
      "expires_in_version": "50",
      "kind": "count",
      "description": "Count ServiceWorkers that really did get a thread created for them"
@@ -133,13 +133,13 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
 +  },
 +  "SERVICE_WORKER_UPDATED": {
 +    "expires_in_version": "50",
-+    "kind": "boolean",
++    "kind": "count",
 +    "description": "Count ServiceWorkers scripts that are updated."
 +  },
 +  "SERVICE_WORKER_LIFE_TIME": {
 +    "expires_in_version": "50",
 +    "kind": "exponential",
-+    "high": "5000",
++    "high": "7200000",
 +    "n_buckets": 20,
 +    "description": "Tracking how long a ServiceWorker stays alive after it is spawned"
    }
