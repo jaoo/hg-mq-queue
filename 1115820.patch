@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent dc24da191831f7e1f671b09597df43ddbcfde2f0
+# Parent 1a66e629b01470a269d8ead9d76b2f38ca24912b
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1115820 - Add telemetry to ServiceWorkers. r=nsm
 
