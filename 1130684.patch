@@ -1,0 +1,1191 @@
+# HG changeset patch
+# Parent b37ff4ab664cd9586fa737b224e57c0e79d3f6c1
+# User Catalin Badea <catalin.badea392@gmail.com>
+
+Bug 1130684 - Implement Service Worker clients.claim.
+
+diff --git a/dom/webidl/Clients.webidl b/dom/webidl/Clients.webidl
+--- a/dom/webidl/Clients.webidl
++++ b/dom/webidl/Clients.webidl
+@@ -9,16 +9,17 @@
+  */
+ 
+ [Exposed=ServiceWorker]
+ interface Clients {
+   // The objects returned will be new instances every time
+   [Throws]
+   Promise<sequence<Client>?> matchAll(optional ClientQueryOptions options);
+   Promise<WindowClient> openWindow(USVString url);
++  [Throws]
+   Promise<void> claim();
+ };
+ 
+ dictionary ClientQueryOptions {
+   boolean includeUncontrolled = false;
+   ClientType type = "window";
+ };
+ 
+diff --git a/dom/workers/ServiceWorkerClients.cpp b/dom/workers/ServiceWorkerClients.cpp
+--- a/dom/workers/ServiceWorkerClients.cpp
++++ b/dom/workers/ServiceWorkerClients.cpp
+@@ -130,16 +130,98 @@ public:
+     if (!releaseRunnable->Dispatch(cx)) {
+       NS_RUNTIMEABORT("Failed to dispatch MatchAll promise control runnable.");
+     }
+ 
+     return NS_OK;
+   }
+ };
+ 
++class ResolveClaimRunnable final : public WorkerRunnable
++{
++  nsRefPtr<PromiseWorkerProxy> mPromiseProxy;
++  nsresult mResult;
++
++public:
++  ResolveClaimRunnable(WorkerPrivate* aWorkerPrivate,
++                       PromiseWorkerProxy* aPromiseProxy,
++                       nsresult aResult)
++    : WorkerRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount)
++    , mPromiseProxy(aPromiseProxy)
++    , mResult(aResult)
++  {
++    AssertIsOnMainThread();
++  }
++
++  bool
++  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
++  {
++    MOZ_ASSERT(aWorkerPrivate);
++    aWorkerPrivate->AssertIsOnWorkerThread();
++
++    Promise* promise = mPromiseProxy->GetWorkerPromise();
++    MOZ_ASSERT(promise);
++
++    if (!NS_FAILED(mResult)) {
++      promise->MaybeResolve(JS::UndefinedHandleValue);
++    } else {
++      promise->MaybeReject(mResult);
++    }
++
++    // Release the reference on the worker thread.
++    mPromiseProxy->CleanUp(aCx);
++
++    return true;
++  }
++};
++
++class ClaimRunnable final : public nsRunnable
++{
++  nsRefPtr<PromiseWorkerProxy> mPromiseProxy;
++  nsCString mScope;
++
++public:
++  ClaimRunnable(PromiseWorkerProxy* aPromiseProxy, const nsCString& aScope)
++    : mPromiseProxy(aPromiseProxy)
++    , mScope(aScope)
++  {
++    MOZ_ASSERT(aPromiseProxy);
++  }
++
++  NS_IMETHOD
++  Run() override
++  {
++    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++    WorkerPrivate* workerPrivate = mPromiseProxy->GetWorkerPrivate();
++    MOZ_ASSERT(swm);
++    MOZ_ASSERT(workerPrivate);
++
++    nsresult rv = swm->ClaimClients(mScope, workerPrivate);
++
++    nsRefPtr<ResolveClaimRunnable> r =
++      new ResolveClaimRunnable(workerPrivate, mPromiseProxy, rv);
++
++    AutoSafeJSContext cx;
++    if (r->Dispatch(cx)) {
++      return NS_OK;
++    }
++
++    // Dispatch to worker thread failed because the worker is shutting down.
++    // Use a control runnable to release the runnable on the worker thread.
++    nsRefPtr<PromiseWorkerProxyControlRunnable> releaseRunnable =
++      new PromiseWorkerProxyControlRunnable(workerPrivate, mPromiseProxy);
++
++    if (!releaseRunnable->Dispatch(cx)) {
++      NS_RUNTIMEABORT("Failed to dispatch Claim control runnable.");
++    }
++
++    return NS_OK;
++  }
++};
++
+ } // anonymous namespace
+ 
+ already_AddRefed<Promise>
+ ServiceWorkerClients::MatchAll(const ClientQueryOptions& aOptions,
+                                ErrorResult& aRv)
+ {
+   WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
+   MOZ_ASSERT(workerPrivate);
+@@ -187,19 +269,38 @@ ServiceWorkerClients::OpenWindow(const n
+     return nullptr;
+   }
+ 
+   promise->MaybeReject(NS_ERROR_NOT_AVAILABLE);
+   return promise.forget();
+ }
+ 
+ already_AddRefed<Promise>
+-ServiceWorkerClients::Claim()
++ServiceWorkerClients::Claim(ErrorResult& aRv)
+ {
+-  ErrorResult result;
+-  nsRefPtr<Promise> promise = Promise::Create(mWorkerScope, result);
+-  if (NS_WARN_IF(result.Failed())) {
++  WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
++  MOZ_ASSERT(workerPrivate);
++
++  nsRefPtr<Promise> promise = Promise::Create(mWorkerScope, aRv);
++  if (NS_WARN_IF(aRv.Failed())) {
+     return nullptr;
+   }
+ 
+-  promise->MaybeResolve(JS::UndefinedHandleValue);
++  nsRefPtr<PromiseWorkerProxy> promiseProxy =
++    PromiseWorkerProxy::Create(workerPrivate, promise);
++  if (!promiseProxy->GetWorkerPromise()) {
++    // Don't dispatch if adding the worker feature failed.
++    return promise.forget();
++  }
++
++  nsString scope;
++  mWorkerScope->GetScope(scope);
++
++  nsRefPtr<ClaimRunnable> runnable =
++    new ClaimRunnable(promiseProxy, NS_ConvertUTF16toUTF8(scope));
++
++  aRv = NS_DispatchToMainThread(runnable);
++  if (NS_WARN_IF(aRv.Failed())) {
++    promise->MaybeReject(NS_ERROR_NOT_AVAILABLE);
++  }
++
+   return promise.forget();
+ }
+diff --git a/dom/workers/ServiceWorkerClients.h b/dom/workers/ServiceWorkerClients.h
+--- a/dom/workers/ServiceWorkerClients.h
++++ b/dom/workers/ServiceWorkerClients.h
+@@ -30,17 +30,17 @@ public:
+ 
+   already_AddRefed<Promise>
+   MatchAll(const ClientQueryOptions& aOptions, ErrorResult& aRv);
+ 
+   already_AddRefed<Promise>
+   OpenWindow(const nsAString& aUrl);
+ 
+   already_AddRefed<Promise>
+-  Claim();
++  Claim(ErrorResult& aRv);
+ 
+   JSObject*
+   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
+ 
+   ServiceWorkerGlobalScope*
+   GetParentObject() const
+   {
+     return mWorkerScope;
+diff --git a/dom/workers/ServiceWorkerContainer.cpp b/dom/workers/ServiceWorkerContainer.cpp
+--- a/dom/workers/ServiceWorkerContainer.cpp
++++ b/dom/workers/ServiceWorkerContainer.cpp
+@@ -45,16 +45,23 @@ ServiceWorkerContainer::~ServiceWorkerCo
+ void
+ ServiceWorkerContainer::DisconnectFromOwner()
+ {
+   RemoveReadyPromise();
+   DOMEventTargetHelper::DisconnectFromOwner();
+ }
+ 
+ void
++ServiceWorkerContainer::ControllerChanged(ErrorResult& aRv)
++{
++  mControllerWorker = nullptr;
++  aRv = DispatchTrustedEvent(NS_LITERAL_STRING("controllerchange"));
++}
++
++void
+ ServiceWorkerContainer::RemoveReadyPromise()
+ {
+   nsCOMPtr<nsPIDOMWindow> window = GetOwner();
+   if (window) {
+     nsCOMPtr<nsIServiceWorkerManager> swm =
+       mozilla::services::GetServiceWorkerManager();
+     if (!swm) {
+       // If the browser is shutting down, we don't need to remove the promise.
+diff --git a/dom/workers/ServiceWorkerContainer.h b/dom/workers/ServiceWorkerContainer.h
+--- a/dom/workers/ServiceWorkerContainer.h
++++ b/dom/workers/ServiceWorkerContainer.h
+@@ -58,24 +58,28 @@ public:
+ 
+   // Testing only.
+   void
+   GetScopeForUrl(const nsAString& aUrl, nsString& aScope, ErrorResult& aRv);
+ 
+   // DOMEventTargetHelper
+   void DisconnectFromOwner() override;
+ 
++  // Invalidates |mControllerWorker| and dispatches a "controllerchange"
++  // event.
++  void
++  ControllerChanged(ErrorResult& aRv);
++
+ private:
+   ~ServiceWorkerContainer();
+ 
+   void RemoveReadyPromise();
+ 
+   // This only changes when a worker hijacks everything in its scope by calling
+-  // replace().
+-  // FIXME(nsm): Bug 982711. Provide API to let SWM invalidate this.
++  // claim.
+   nsRefPtr<workers::ServiceWorker> mControllerWorker;
+ 
+   nsRefPtr<Promise> mReadyPromise;
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -2149,36 +2149,51 @@ ServiceWorkerManager::MaybeStartControll
+     GetServiceWorkerRegistrationInfo(aDoc);
+   if (registration) {
+     MOZ_ASSERT(!mControlledDocuments.Contains(aDoc));
+     registration->StartControllingADocument();
+     // Use the already_AddRefed<> form of Put to avoid the addref-deref since
+     // we don't need the registration pointer in this function anymore.
+     mControlledDocuments.Put(aDoc, registration.forget());
+   }
++
++  // We keep a set of documents that service workers may choose to start
++  // controlling using claim().
++  MOZ_ASSERT(!mAllDocuments.Contains(aDoc));
++  mAllDocuments.PutEntry(aDoc);
+ }
+ 
+ void
+ ServiceWorkerManager::MaybeStopControlling(nsIDocument* aDoc)
+ {
+   MOZ_ASSERT(aDoc);
+   nsRefPtr<ServiceWorkerRegistrationInfo> registration;
+   mControlledDocuments.Remove(aDoc, getter_AddRefs(registration));
+   // A document which was uncontrolled does not maintain that state itself, so
+   // it will always call MaybeStopControlling() even if there isn't an
+   // associated registration. So this check is required.
+   if (registration) {
+-    registration->StopControllingADocument();
+-    if (!registration->IsControllingDocuments()) {
+-      if (registration->mPendingUninstall) {
+-        registration->Clear();
+-        RemoveRegistration(registration);
+-      } else {
+-        registration->TryToActivate();
+-      }
++    StopControllingADocument(registration);
++  }
++
++  if (mAllDocuments.Contains(aDoc)) {
++    mAllDocuments.RemoveEntry(aDoc);
++  }
++}
++
++void
++ServiceWorkerManager::StopControllingADocument(ServiceWorkerRegistrationInfo* aRegistration)
++{
++  aRegistration->StopControllingADocument();
++  if (!aRegistration->IsControllingDocuments()) {
++    if (aRegistration->mPendingUninstall) {
++      aRegistration->Clear();
++      RemoveRegistration(aRegistration);
++    } else {
++      aRegistration->TryToActivate();
+     }
+   }
+ }
+ 
+ NS_IMETHODIMP
+ ServiceWorkerManager::GetScopeForUrl(const nsAString& aUrl, nsAString& aScope)
+ {
+   nsCOMPtr<nsIURI> uri;
+@@ -2723,16 +2738,17 @@ ServiceWorkerManager::CreateServiceWorke
+                           nullptr, nullptr);
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     return rv;
+   }
+ 
+   info.mResolvedScriptURI = info.mBaseURI;
+   MOZ_ASSERT(!aInfo->CacheName().IsEmpty());
+   info.mServiceWorkerCacheName = aInfo->CacheName();
++  info.mServiceWorkerID = aInfo->ID();
+ 
+   rv = info.mBaseURI->GetHost(info.mDomain);
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     return rv;
+   }
+ 
+   info.mPrincipal = aPrincipal;
+ 
+@@ -2868,16 +2884,40 @@ EnumControlledDocuments(nsISupports* aKe
+   }
+ 
+   ServiceWorkerClientInfo clientInfo(document);
+   data->mDocuments.AppendElement(clientInfo);
+ 
+   return PL_DHASH_NEXT;
+ }
+ 
++static void
++FireControllerChangeOnDocument(nsIDocument* aDocument)
++{
++  nsCOMPtr<nsPIDOMWindow> w = aDocument->GetWindow();
++  MOZ_ASSERT(w);
++  auto* window = static_cast<nsGlobalWindow*>(w.get());
++  if (NS_WARN_IF(!window)) {
++    NS_WARNING("No valid nsGlobalWindow");
++    return;
++  }
++
++  ErrorResult result;
++  dom::Navigator* navigator = window->GetNavigator(result);
++  if (NS_WARN_IF(result.Failed())) {
++    return;
++  }
++
++  nsRefPtr<ServiceWorkerContainer> container = navigator->ServiceWorker();
++  container->ControllerChanged(result);
++  if (result.Failed()) {
++    NS_WARNING("Failed to dispatch controllerchange event");
++  }
++}
++
+ static PLDHashOperator
+ FireControllerChangeOnMatchingDocument(nsISupports* aKey,
+                                        ServiceWorkerRegistrationInfo* aValue,
+                                        void* aData)
+ {
+   AssertIsOnMainThread();
+ 
+   ServiceWorkerRegistrationInfo* contextReg = static_cast<ServiceWorkerRegistrationInfo*>(aData);
+@@ -2885,35 +2925,30 @@ FireControllerChangeOnMatchingDocument(n
+     return PL_DHASH_NEXT;
+   }
+ 
+   nsCOMPtr<nsIDocument> doc = do_QueryInterface(aKey);
+   if (NS_WARN_IF(!doc)) {
+     return PL_DHASH_NEXT;
+   }
+ 
+-  nsCOMPtr<nsPIDOMWindow> w = doc->GetWindow();
+-  MOZ_ASSERT(w);
+-  auto* window = static_cast<nsGlobalWindow*>(w.get());
+-  if (NS_WARN_IF(!window)) {
+-    NS_WARNING("No valid nsGlobalWindow");
+-    return PL_DHASH_NEXT;
+-  }
+-
+-  ErrorResult result;
+-  dom::Navigator* navigator = window->GetNavigator(result);
+-  if (NS_WARN_IF(result.Failed())) {
+-    return PL_DHASH_NEXT;
+-  }
+-
+-  nsRefPtr<ServiceWorkerContainer> container = navigator->ServiceWorker();
+-  result = container->DispatchTrustedEvent(NS_LITERAL_STRING("controllerchange"));
+-  if (result.Failed()) {
+-    NS_WARNING("Failed to dispatch controllerchange event");
+-  }
++  FireControllerChangeOnDocument(doc);
++
++  return PL_DHASH_NEXT;
++}
++
++static PLDHashOperator
++ClaimMatchingClients(nsISupportsHashKey* aKey, void* aData)
++{
++  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++  ServiceWorkerRegistrationInfo* workerRegistration =
++    static_cast<ServiceWorkerRegistrationInfo*>(aData);
++  nsCOMPtr<nsIDocument> document = do_QueryInterface(aKey->GetKey());
++
++  swm->MaybeClaimClient(document, workerRegistration);
+ 
+   return PL_DHASH_NEXT;
+ }
+ } // anonymous namespace
+ 
+ void
+ ServiceWorkerManager::GetAllClients(const nsCString& aScope,
+                                     nsTArray<ServiceWorkerClientInfo>& aControlledDocuments)
+@@ -2926,16 +2961,90 @@ ServiceWorkerManager::GetAllClients(cons
+   }
+ 
+   FilterRegistrationData data(aControlledDocuments, registration);
+ 
+   mControlledDocuments.EnumerateRead(EnumControlledDocuments, &data);
+ }
+ 
+ void
++ServiceWorkerManager::MaybeClaimClient(nsIDocument* aDocument,
++                                       ServiceWorkerRegistrationInfo* aWorkerRegistration)
++{
++  MOZ_ASSERT(aWorkerRegistration);
++  MOZ_ASSERT(aWorkerRegistration->mActiveWorker);
++
++  // Same origin check
++  nsIURI* documentURI = aDocument->GetDocumentURI();
++  nsCOMPtr<nsIURI> scriptURI;
++  nsCString scriptSpec = aWorkerRegistration->mActiveWorker->ScriptSpec();
++  nsresult rv = NS_NewURI(getter_AddRefs(scriptURI), scriptSpec,
++                          nullptr, nullptr);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return;
++  }
++
++  nsCOMPtr<nsIScriptSecurityManager> securityManager =
++    nsContentUtils::GetSecurityManager();
++  rv = securityManager->CheckSameOriginURI(documentURI, scriptURI, false);
++  if (NS_FAILED(rv)) {
++    return;
++  }
++
++  // The registration that should be controlling the client
++  nsRefPtr<ServiceWorkerRegistrationInfo> matchingRegistration =
++    GetServiceWorkerRegistrationInfo(aDocument);
++
++  // The registration currently controlling the client
++  nsRefPtr<ServiceWorkerRegistrationInfo> controllingRegistration;
++  rv = GetDocumentRegistration(aDocument,
++                               getter_AddRefs(controllingRegistration));
++
++  if (aWorkerRegistration != matchingRegistration ||
++        aWorkerRegistration == controllingRegistration) {
++    return;
++  }
++
++  if (controllingRegistration) {
++    StopControllingADocument(controllingRegistration);
++  }
++
++  mControlledDocuments.Put(aDocument, aWorkerRegistration);
++  aWorkerRegistration->StartControllingADocument();
++
++  FireControllerChangeOnDocument(aDocument);
++}
++
++nsresult
++ServiceWorkerManager::ClaimClients(const nsCString& aScope,
++                                   WorkerPrivate* aWorkerPrivate)
++{
++  nsRefPtr<ServiceWorkerRegistrationInfo> registration =
++    GetRegistration(aScope);
++
++  if (!registration) {
++    // XXXcatalinb: This can happen if the registration is unregistered while
++    // the claim runnable is waiting in queue. We reject the claim promise
++    // with NS_ERROR_FAILURE.
++    NS_WARNING("Claim request doesn't have a valid registration.");
++    return NS_ERROR_FAILURE;
++  }
++
++  if (!registration->mActiveWorker ||
++      !(registration->mActiveWorker->ID() == aWorkerPrivate->ServiceWorkerID())) {
++    // The worker is not active.
++    return NS_ERROR_DOM_INVALID_STATE_ERR;
++  }
++
++  mAllDocuments.EnumerateEntries(ClaimMatchingClients, registration);
++
++  return NS_OK;
++}
++
++void
+ ServiceWorkerManager::FireControllerChange(ServiceWorkerRegistrationInfo* aRegistration)
+ {
+   mControlledDocuments.EnumerateRead(FireControllerChangeOnMatchingDocument, aRegistration);
+ }
+ 
+ ServiceWorkerRegistrationInfo*
+ ServiceWorkerManager::CreateNewRegistration(const nsCString& aScope,
+                                             nsIPrincipal* aPrincipal)
+@@ -3187,9 +3296,18 @@ ServiceWorkerInfo::UpdateState(ServiceWo
+   // Activated can only go to redundant.
+   MOZ_ASSERT_IF(mState == ServiceWorkerState::Activated, aState == ServiceWorkerState::Redundant);
+ #endif
+   mState = aState;
+   for (uint32_t i = 0; i < mInstances.Length(); ++i) {
+     mInstances[i]->QueueStateChangeEvent(mState);
+   }
+ }
++
++static uint64_t gServiceWorkerInfoCurrentID = 0;
++
++uint64_t
++ServiceWorkerInfo::GetNextID() const
++{
++  return ++gServiceWorkerInfoCurrentID;
++}
++
+ END_WORKERS_NAMESPACE
+diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManager.h
+--- a/dom/workers/ServiceWorkerManager.h
++++ b/dom/workers/ServiceWorkerManager.h
+@@ -210,25 +210,35 @@ public:
+  */
+ class ServiceWorkerInfo final
+ {
+ private:
+   const ServiceWorkerRegistrationInfo* mRegistration;
+   nsCString mScriptSpec;
+   nsString mCacheName;
+   ServiceWorkerState mState;
++
++  // This id is shared with WorkerPrivate to match requests issued by service
++  // workers to their corresponding serviceWorkerInfo.
++  uint64_t mServiceWorkerID;
++
+   // We hold rawptrs since the ServiceWorker constructor and destructor ensure
+   // addition and removal.
+   // There is a high chance of there being at least one ServiceWorker
+   // associated with this all the time.
+   nsAutoTArray<ServiceWorker*, 1> mInstances;
+ 
+   ~ServiceWorkerInfo()
+   { }
+ 
++  // Generates a unique id for the service worker, with zero being treated as
++  // invalid.
++  uint64_t
++  GetNextID() const;
++
+ public:
+   NS_INLINE_DECL_REFCOUNTING(ServiceWorkerInfo)
+ 
+   const nsCString&
+   ScriptSpec() const
+   {
+     return mScriptSpec;
+   }
+@@ -247,16 +257,17 @@ public:
+ 
+   explicit ServiceWorkerInfo(ServiceWorkerRegistrationInfo* aReg,
+                              const nsACString& aScriptSpec,
+                              const nsAString& aCacheName)
+     : mRegistration(aReg)
+     , mScriptSpec(aScriptSpec)
+     , mCacheName(aCacheName)
+     , mState(ServiceWorkerState::EndGuard_)
++    , mServiceWorkerID(GetNextID())
+   {
+     MOZ_ASSERT(mRegistration);
+     MOZ_ASSERT(!aCacheName.IsEmpty());
+   }
+ 
+   ServiceWorkerState
+   State() const
+   {
+@@ -264,16 +275,22 @@ public:
+   }
+ 
+   const nsString&
+   CacheName() const
+   {
+     return mCacheName;
+   }
+ 
++  uint64_t
++  ID() const
++  {
++    return mServiceWorkerID;
++  }
++
+   void
+   UpdateState(ServiceWorkerState aState);
+ 
+   // Only used to set initial state when loading from disk!
+   void
+   SetActivateStateUncheckedWithoutEvent(ServiceWorkerState aState)
+   {
+     mState = aState;
+@@ -337,16 +354,19 @@ public:
+   // Scope to registration. 
+   // The scope should be a fully qualified valid URL.
+   nsRefPtrHashtable<nsCStringHashKey, ServiceWorkerRegistrationInfo> mServiceWorkerRegistrationInfos;
+ 
+   nsTObserverArray<ServiceWorkerRegistrationListener*> mServiceWorkerRegistrationListeners;
+ 
+   nsRefPtrHashtable<nsISupportsHashKey, ServiceWorkerRegistrationInfo> mControlledDocuments;
+ 
++  // Set of all documents that may be controlled by a service worker.
++  nsTHashtable<nsISupportsHashKey> mAllDocuments;
++
+   // Maps scopes to job queues.
+   nsClassHashtable<nsCStringHashKey, ServiceWorkerJobQueue> mJobQueues;
+ 
+   nsDataHashtable<nsCStringHashKey, bool> mSetOfScopesBeingUpdated;
+ 
+   already_AddRefed<ServiceWorkerRegistrationInfo>
+   GetRegistration(const nsCString& aScope) const
+   {
+@@ -385,16 +405,23 @@ public:
+               uint32_t aLineNumber,
+               uint32_t aColumnNumber,
+               uint32_t aFlags);
+ 
+   void
+   GetAllClients(const nsCString& aScope,
+                 nsTArray<ServiceWorkerClientInfo>& aControlledDocuments);
+ 
++  void
++  MaybeClaimClient(nsIDocument* aDocument,
++                   ServiceWorkerRegistrationInfo* aWorkerRegistration);
++
++  nsresult
++  ClaimClients(const nsCString& aScope, WorkerPrivate* aWorkerPrivate);
++
+   static already_AddRefed<ServiceWorkerManager>
+   GetInstance();
+ 
+  void LoadRegistrations(
+                  const nsTArray<ServiceWorkerRegistrationData>& aRegistrations);
+ 
+   NS_IMETHOD
+   AddRegistrationEventListener(const nsAString& aScope,
+@@ -434,16 +461,19 @@ private:
+ 
+   already_AddRefed<ServiceWorker>
+   CreateServiceWorkerForScope(const nsACString& aScope);
+ 
+   void
+   InvalidateServiceWorkerRegistrationWorker(ServiceWorkerRegistrationInfo* aRegistration,
+                                             WhichServiceWorker aWhichOnes);
+ 
++  void
++  StopControllingADocument(ServiceWorkerRegistrationInfo* aRegistration);
++
+   already_AddRefed<ServiceWorkerRegistrationInfo>
+   GetServiceWorkerRegistrationInfo(nsPIDOMWindow* aWindow);
+ 
+   already_AddRefed<ServiceWorkerRegistrationInfo>
+   GetServiceWorkerRegistrationInfo(nsIDocument* aDoc);
+ 
+   already_AddRefed<ServiceWorkerRegistrationInfo>
+   GetServiceWorkerRegistrationInfo(nsIURI* aURI);
+diff --git a/dom/workers/WorkerPrivate.cpp b/dom/workers/WorkerPrivate.cpp
+--- a/dom/workers/WorkerPrivate.cpp
++++ b/dom/workers/WorkerPrivate.cpp
+@@ -2240,16 +2240,17 @@ PRThreadFromThread(nsIThread* aThread)
+ NS_IMPL_ISUPPORTS_INHERITED0(MainThreadReleaseRunnable, nsRunnable)
+ 
+ NS_IMPL_ISUPPORTS_INHERITED0(TopLevelWorkerFinishedRunnable, nsRunnable)
+ 
+ NS_IMPL_ISUPPORTS(TimerThreadEventTarget, nsIEventTarget)
+ 
+ WorkerLoadInfo::WorkerLoadInfo()
+   : mWindowID(UINT64_MAX)
++  , mServiceWorkerID(0)
+   , mFromWindow(false)
+   , mEvalAllowed(false)
+   , mReportCSPViolations(false)
+   , mXHRParamsAllowed(false)
+   , mPrincipalIsSystem(false)
+   , mIsInPrivilegedApp(false)
+   , mIsInCertifiedApp(false)
+   , mIndexedDBAllowed(false)
+@@ -2293,16 +2294,17 @@ WorkerLoadInfo::StealFrom(WorkerLoadInfo
+   aOther.mInterfaceRequestor.swap(mInterfaceRequestor);
+ 
+   MOZ_ASSERT(!mPrincipalInfo);
+   mPrincipalInfo = aOther.mPrincipalInfo.forget();
+ 
+   mDomain = aOther.mDomain;
+   mServiceWorkerCacheName = aOther.mServiceWorkerCacheName;
+   mWindowID = aOther.mWindowID;
++  mServiceWorkerID = aOther.mServiceWorkerID;
+   mFromWindow = aOther.mFromWindow;
+   mEvalAllowed = aOther.mEvalAllowed;
+   mReportCSPViolations = aOther.mReportCSPViolations;
+   mXHRParamsAllowed = aOther.mXHRParamsAllowed;
+   mPrincipalIsSystem = aOther.mPrincipalIsSystem;
+   mIsInPrivilegedApp = aOther.mIsInPrivilegedApp;
+   mIsInCertifiedApp = aOther.mIsInCertifiedApp;
+   mIndexedDBAllowed = aOther.mIndexedDBAllowed;
+diff --git a/dom/workers/WorkerPrivate.h b/dom/workers/WorkerPrivate.h
+--- a/dom/workers/WorkerPrivate.h
++++ b/dom/workers/WorkerPrivate.h
+@@ -461,16 +461,22 @@ public:
+   }
+ 
+   uint64_t
+   WindowID() const
+   {
+     return mLoadInfo.mWindowID;
+   }
+ 
++  uint64_t
++  ServiceWorkerID() const
++  {
++    return mLoadInfo.mServiceWorkerID;
++  }
++
+   nsIURI*
+   GetBaseURI() const
+   {
+     AssertIsOnMainThread();
+     return mLoadInfo.mBaseURI;
+   }
+ 
+   void
+diff --git a/dom/workers/Workers.h b/dom/workers/Workers.h
+--- a/dom/workers/Workers.h
++++ b/dom/workers/Workers.h
+@@ -239,16 +239,17 @@ struct WorkerLoadInfo
+   nsRefPtr<InterfaceRequestor> mInterfaceRequestor;
+ 
+   nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
+   nsCString mDomain;
+ 
+   nsString mServiceWorkerCacheName;
+ 
+   uint64_t mWindowID;
++  uint64_t mServiceWorkerID;
+ 
+   bool mFromWindow;
+   bool mEvalAllowed;
+   bool mReportCSPViolations;
+   bool mXHRParamsAllowed;
+   bool mPrincipalIsSystem;
+   bool mIsInPrivilegedApp;
+   bool mIsInCertifiedApp;
+diff --git a/dom/workers/test/serviceworkers/claim_clients/client.html b/dom/workers/test/serviceworkers/claim_clients/client.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/claim_clients/client.html
+@@ -0,0 +1,44 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1130684 - claim client </title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++
++  if (!parent) {
++    info("This page shouldn't be launched directly!");
++  }
++
++  window.onload = function() {
++    parent.postMessage("READY", "*");
++  }
++
++  navigator.serviceWorker.oncontrollerchange = function() {
++    parent.postMessage({
++      event: "controllerchange",
++      controller: (navigator.serviceWorker.controller !== null)
++    }, "*");
++  }
++
++  navigator.serviceWorker.onmessage = function(e) {
++    parent.postMessage({
++      event: "message",
++      data: e.data
++    }, "*");
++  }
++
++</script>
++</pre>
++</body>
++</html>
++
+diff --git a/dom/workers/test/serviceworkers/claim_oninstall_worker.js b/dom/workers/test/serviceworkers/claim_oninstall_worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/claim_oninstall_worker.js
+@@ -0,0 +1,18 @@
++var resolvePromise;
++
++oninstall = function(e) {
++  var lockState = new Promise(function(res, rej) {
++    resolvePromise = res;
++  });
++
++  e.waitUntil(lockState);
++}
++
++onmessage = function(messageEvent) {
++  self.clients.claim().then(function(res) {
++    // claim should always throw.
++    messageEvent.source.postMessage(false);
++  }).catch(function(e) {
++    messageEvent.source.postMessage(true);
++  }).then(resolvePromise);
++}
+diff --git a/dom/workers/test/serviceworkers/claim_worker_1.js b/dom/workers/test/serviceworkers/claim_worker_1.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/claim_worker_1.js
+@@ -0,0 +1,29 @@
++onactivate = function(e) {
++  var result = {
++    resolve_value: false,
++    match_count_before: -1,
++    match_count_after: -1,
++    message: "claim_worker_1"
++  };
++
++  self.clients.matchAll().then(function(matched) {
++    // should be 0
++    result.match_count_before = matched.length;
++  }).then(function() {
++    var claimPromise = self.clients.claim().then(function(ret) {
++      result.resolve_value = ret;
++    });
++
++    return claimPromise.then(self.clients.matchAll().then(function(matched) {
++      // should be 2
++      final_matched_count = matched.length;
++      if (final_matched_count === 2) {
++        for (i = 0; i < matched.length; i++) {
++          matched[i].postMessage(result);
++        }
++      } else {
++        dump("ERROR: claim_worker_1 failed to capture clients. count=" + final_matched_count + "\n");
++      }
++    }));
++  });
++}
+diff --git a/dom/workers/test/serviceworkers/claim_worker_2.js b/dom/workers/test/serviceworkers/claim_worker_2.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/claim_worker_2.js
+@@ -0,0 +1,27 @@
++onactivate = function(e) {
++  var result = {
++    resolve_value: false,
++    match_count_before: -1,
++    match_count_after: -1,
++    message: "claim_worker_2"
++  };
++
++  self.clients.matchAll().then(function(matched) {
++    // should be 0
++    result.match_count_before = matched.length;
++  }).then(function() {
++    var claimPromise = self.clients.claim().then(function(ret) {
++      result.resolve_value = ret;
++    });
++
++    return claimPromise.then(self.clients.matchAll().then(function(matched) {
++      // should be 1
++      final_matched_count = matched.length;
++      if (final_matched_count === 1) {
++        matched[0].postMessage(result);
++      } else {
++        dump("ERROR: claim_worker_2 failed to capture clients. count=" + final_matched_count + "\n");
++      }
++    }));
++  });
++}
+diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
+--- a/dom/workers/test/serviceworkers/mochitest.ini
++++ b/dom/workers/test/serviceworkers/mochitest.ini
+@@ -61,16 +61,20 @@ support-files =
+   match_all_client/match_all_client_id.html
+   match_all_client_id_worker.js
+   source_message_posting_worker.js
+   scope/scope_worker.js
+   redirect_serviceworker.sjs
+   importscript.sjs
+   importscript_worker.js
+   client_focus_worker.js
++  claim_oninstall_worker.js
++  claim_worker_1.js
++  claim_worker_2.js
++  claim_clients/client.html
+   bug1151916_worker.js
+   bug1151916_driver.html
+   worker_updatefoundevent.js
+   worker_updatefoundevent2.js
+   updatefoundevent.html
+   empty.js
+   periodic.sjs
+   periodic/frame.html
+@@ -98,12 +102,14 @@ skip-if = os != "linux" # Bug 1136780
+ [test_close.html]
+ [test_serviceworker_interfaces.html]
+ [test_serviceworker_not_sharedworker.html]
+ [test_match_all_client_id.html]
+ [test_sandbox_intercept.html]
+ [test_request_context.html]
+ [test_importscript.html]
+ [test_client_focus.html]
++[test_claim_oninstall.html]
++[test_claim.html]
+ [test_bug1151916.html]
+ [test_workerupdatefoundevent.html]
+ [test_empty_serviceworker.html]
+ [test_periodic_update.html]
+diff --git a/dom/workers/test/serviceworkers/test_claim.html b/dom/workers/test/serviceworkers/test_claim.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/test_claim.html
+@@ -0,0 +1,166 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1130684 - Test service worker clients claim onactivate </title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++  var registration_1;
++  var registration_2;
++  var client;
++
++  function register_1() {
++    return navigator.serviceWorker.register("claim_worker_1.js",
++                                            { scope: "./" })
++      .then((swr) => registration_1 = swr);
++  }
++
++  function register_2() {
++    return navigator.serviceWorker.register("claim_worker_2.js",
++                                            { scope: "./claim_clients/client.html" })
++      .then((swr) => registration_2 = swr);
++  }
++
++  function unregister(reg) {
++    return reg.unregister().then(function(result) {
++      ok(result, "Unregister should return true.");
++    });
++  }
++
++  function createClient() {
++    var p = new Promise(function(res, rej) {
++      window.onmessage = function(e) {
++        if (e.data === "READY") {
++          res();
++        }
++      }
++    });
++
++    content = document.getElementById("content");
++    ok(content, "parent exists.");
++
++    var iframe = document.createElement("iframe");
++    iframe.setAttribute('src', "claim_clients/client.html");
++    content.appendChild(iframe);
++
++    client = iframe;
++
++    return p;
++  }
++
++  function testController() {
++    ok(navigator.serviceWorker.controller.scriptURL.match("claim_worker_1"),
++        "Controlling service worker has the correct url.");
++  }
++
++  function testClaimFirstWorker() {
++    // wait for the worker to control us
++    var controllerChange = new Promise(function(res, rej) {
++      navigator.serviceWorker.oncontrollerchange = function(e) {
++        ok(true, "controller changed event received.");
++        res();
++      };
++    });
++
++    var messageFromWorker = new Promise(function(res, rej) {
++      navigator.serviceWorker.onmessage = function(e) {
++        ok(e.data.message === "claim_worker_1", "Received message from claiming worker.");
++        res();
++      }
++    });
++
++    var resolveClientMessage, resolveClientControllerChange;
++    var messageFromClient = new Promise(function(res, rej) {
++      resolveClientMessage = res;
++    });
++    var controllerChangeFromClient = new Promise(function(res, rej) {
++      resolveClientControllerChange = res;
++    });
++    window.onmessage = function(e) {
++      if (!e.data.event) {
++        ok(false, "Unknown message received: " + e.data);
++      }
++
++      if (e.data.event === "controllerchange") {
++        ok(e.data.controller,
++           "Client was claimed and received controllerchange event.");
++        resolveClientControllerChange();
++      }
++
++      if (e.data.event === "message") {
++        ok(e.data.data.message === "claim_worker_1",
++           "Client received message from claiming worker.");
++        resolveClientMessage();
++      }
++    }
++
++    return Promise.all([controllerChange, messageFromWorker, messageFromClient,
++                        controllerChangeFromClient]).then(testController);
++  }
++
++  function testClaimSecondWorker() {
++    navigator.serviceWorker.oncontrollerchange = function(e) {
++      ok(false, "Claim_worker_2 shouldn't claim this window.");
++    }
++    var resolveClientMessage, resolveClientControllerChange;
++    var messageFromClient = new Promise(function(res, rej) {
++      resolveClientMessage = res;
++    });
++    var controllerChangeFromClient = new Promise(function(res, rej) {
++      resolveClientControllerChange = res;
++    });
++    window.onmessage = function(e) {
++      if (!e.data.event) {
++        ok(false, "Unknown message received: " + e.data);
++      }
++
++      if (e.data.event === "controllerchange") {
++        ok(e.data.controller,
++           "Client was claimed by the second worker and received controllerchange event");
++        resolveClientControllerChange();
++      }
++
++      if (e.data.event === "message") {
++        ok(e.data.data.message === "claim_worker_2",
++           "Client received message from the second worker.");
++        resolveClientMessage();
++      }
++    }
++
++    return Promise.all([messageFromClient, controllerChangeFromClient])
++      .then(testController);
++  }
++
++  function runTest() {
++    createClient()
++      .then(register_1)
++      .then(testClaimFirstWorker)
++      .then(register_2)
++      .then(testClaimSecondWorker)
++      .then(function() { return unregister(registration_1); })
++      .then(function() { return unregister(registration_2); })
++      .catch(function(e) {
++        ok(false, "Some test failed with error " + e);
++      }).then(SimpleTest.finish);
++  }
++
++  SimpleTest.waitForExplicitFinish();
++  SpecialPowers.pushPrefEnv({"set": [
++    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++    ["dom.serviceWorkers.enabled", true],
++    ["dom.serviceWorkers.testing.enabled", true]
++  ]}, runTest);
++</script>
++</pre>
++</body>
++</html>
++
+diff --git a/dom/workers/test/serviceworkers/test_claim_oninstall.html b/dom/workers/test/serviceworkers/test_claim_oninstall.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/test_claim_oninstall.html
+@@ -0,0 +1,70 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1130684 - Test service worker clients.claim oninstall</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++  var registration;
++
++  function register() {
++    return navigator.serviceWorker.register("claim_oninstall_worker.js",
++                                            { scope: "./" })
++      .then((swr) => registration = swr);
++  }
++
++
++  function unregister() {
++    return registration.unregister().then(function(result) {
++      info("got:" + result);
++      ok(result, "Unregister should return true.");
++    });
++  }
++
++  function testClaim() {
++    ok(registration.installing, "Worker should be in installing state");
++    registration.installing.postMessage("go");
++    navigator.serviceWorker.oncontrollerchange = function() {
++      ok(false, "Claim should not succeed when the worker is not active.");
++    }
++
++    var p = new Promise(function(res, rej) {
++      navigator.serviceWorker.onmessage = function(e) {
++        ok(e.data, "Claim should reject if the worker is not active");
++        ok(navigator.serviceWorker.controller === null, "Client is not controlled.");
++        res();
++      }
++    });
++
++    return p;
++  }
++
++  function runTest() {
++    register()
++      .then(testClaim)
++      .then(unregister)
++      .catch(function(e) {
++        ok(false, "Some test failed with error " + e);
++      }).then(SimpleTest.finish);
++  }
++
++  SimpleTest.waitForExplicitFinish();
++  SpecialPowers.pushPrefEnv({"set": [
++    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++    ["dom.serviceWorkers.enabled", true],
++    ["dom.serviceWorkers.testing.enabled", true]
++  ]}, runTest);
++</script>
++</pre>
++</body>
++</html>
++

@@ -1,19 +1,19 @@
 # HG changeset patch
-# Parent 808863cff38de00a4c6673c29ba86312b8195921
-# User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
+# Parent 5674f065b4889cfa515f8f87477b146628e1140e
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
 Bug 1131352 - Add ServiceWorkerGlobalScope skipWaiting(). r=nsm
 
 diff --git a/dom/webidl/ServiceWorkerGlobalScope.webidl b/dom/webidl/ServiceWorkerGlobalScope.webidl
 --- a/dom/webidl/ServiceWorkerGlobalScope.webidl
 +++ b/dom/webidl/ServiceWorkerGlobalScope.webidl
-@@ -15,16 +15,19 @@
+@@ -11,16 +11,19 @@
+  */
+ 
+ [Global=(Worker,ServiceWorker),
+  Exposed=ServiceWorker]
  interface ServiceWorkerGlobalScope : WorkerGlobalScope {
    readonly attribute Clients clients;
- 
-   void update();
- 
-   [Throws]
-   Promise<boolean> unregister();
+   readonly attribute ServiceWorkerRegistration registration;
  
 +  [Throws]
 +  Promise<boolean> skipWaiting();
@@ -26,29 +26,296 @@ diff --git a/dom/webidl/ServiceWorkerGlobalScope.webidl b/dom/webidl/ServiceWork
  
    // The event.source of these MessageEvents are instances of Client
    attribute EventHandler onmessage;
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -853,16 +853,32 @@ private:
+ 
+     mRegistration->mWaitingWorker = mRegistration->mInstallingWorker.forget();
+     mRegistration->mWaitingWorker->UpdateState(ServiceWorkerState::Installed);
+     swm->InvalidateServiceWorkerRegistrationWorker(mRegistration,
+                                                    WhichServiceWorker::INSTALLING_WORKER | WhichServiceWorker::WAITING_WORKER);
+ 
+     // FIXME(nsm): Bug 982711 Deal with activateImmediately.
+     NS_WARN_IF_FALSE(!aActivateImmediately, "Immediate activation using replace() is not supported yet");
++
++    // "If registration's waiting worker's skip waiting flag is set"
++    if (mRegistration->mWaitingWorker->SkipWaitingFlag()) {
++      nsRefPtr<ServiceWorkerInfo> exitingWorker = mRegistration->mActiveWorker;
++      if (exitingWorker) {
++        // FIXME(jaoo): Wait for exitingWorker to finish and terminate.
++        exitingWorker->UpdateState(ServiceWorkerState::Redundant);
++        nsresult rv = serviceWorkerScriptCache::PurgeCache(mPrincipal,
++                                                           exitingWorker->CacheName());
++        if (NS_FAILED(rv)) {
++          NS_WARNING("Failed to purge the activating cache.");
++        }
++        swm->InvalidateServiceWorkerRegistrationWorker(mRegistration, WhichServiceWorker::ACTIVE_WORKER);
++      }
++    }
++
+     Done(NS_OK);
+     // Activate() is invoked out of band of atomic.
+     mRegistration->TryToActivate();
+   }
+ };
+ 
+ NS_IMPL_ISUPPORTS_INHERITED0(ServiceWorkerRegisterJob, ServiceWorkerJob);
+ 
+@@ -1143,17 +1159,17 @@ LifecycleEventWorkerRunnable::DispatchLi
+     new LifecycleEventPromiseHandler(mTask, false /* activateImmediately */);
+   waitUntilPromise->AppendNativeHandler(handler);
+   return true;
+ }
+ 
+ void
+ ServiceWorkerRegistrationInfo::TryToActivate()
+ {
+-  if (!IsControllingDocuments()) {
++  if (!IsControllingDocuments() || mWaitingWorker->SkipWaitingFlag()) {
+     Activate();
+   }
+ }
+ 
+ void
+ ContinueActivateTask::ContinueAfterWorkerEvent(bool aSuccess, bool aActivateImmediately /* unused */)
+ {
+   mRegistration->FinishActivate(aSuccess);
+@@ -3034,16 +3050,37 @@ ServiceWorkerManager::ClaimClients(const
+     return NS_ERROR_DOM_INVALID_STATE_ERR;
+   }
+ 
+   mAllDocuments.EnumerateEntries(ClaimMatchingClients, registration);
+ 
+   return NS_OK;
+ }
+ 
++nsresult
++ServiceWorkerManager::FlipSkipWaitingFlag(const nsCString& aScope,
++                                          WorkerPrivate* aWorkerPrivate)
++{
++  nsRefPtr<ServiceWorkerRegistrationInfo> registration = GetRegistration(aScope);
++  if (!registration) {
++    return NS_ERROR_FAILURE;
++  }
++
++  nsRefPtr<ServiceWorkerInfo> newest = registration->Newest();
++  if (!newest) {
++    return NS_ERROR_FAILURE;
++  }
++
++  if (newest->ID() == aWorkerPrivate->ServiceWorkerID()) {
++    newest->SetSkipWaitingFlag(true);
++  }
++
++  return NS_OK;
++}
++
+ void
+ ServiceWorkerManager::FireControllerChange(ServiceWorkerRegistrationInfo* aRegistration)
+ {
+   mControlledDocuments.EnumerateRead(FireControllerChangeOnMatchingDocument, aRegistration);
+ }
+ 
+ ServiceWorkerRegistrationInfo*
+ ServiceWorkerManager::CreateNewRegistration(const nsCString& aScope,
+diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManager.h
+--- a/dom/workers/ServiceWorkerManager.h
++++ b/dom/workers/ServiceWorkerManager.h
+@@ -220,16 +220,17 @@ private:
+   // workers to their corresponding serviceWorkerInfo.
+   uint64_t mServiceWorkerID;
+ 
+   // We hold rawptrs since the ServiceWorker constructor and destructor ensure
+   // addition and removal.
+   // There is a high chance of there being at least one ServiceWorker
+   // associated with this all the time.
+   nsAutoTArray<ServiceWorker*, 1> mInstances;
++  bool mSkipWaitingFlag;
+ 
+   ~ServiceWorkerInfo()
+   { }
+ 
+   // Generates a unique id for the service worker, with zero being treated as
+   // invalid.
+   uint64_t
+   GetNextID() const;
+@@ -250,24 +251,34 @@ public:
+   }
+ 
+   void SetScriptSpec(const nsCString& aSpec)
+   {
+     MOZ_ASSERT(!aSpec.IsEmpty());
+     mScriptSpec = aSpec;
+   }
+ 
++  void SetSkipWaitingFlag(const bool aFlag)
++  {
++    AssertIsOnMainThread();
++    if (aFlag == false) {
++      return;
++    }
++    mSkipWaitingFlag = aFlag;
++  }
++
+   explicit ServiceWorkerInfo(ServiceWorkerRegistrationInfo* aReg,
+                              const nsACString& aScriptSpec,
+                              const nsAString& aCacheName)
+     : mRegistration(aReg)
+     , mScriptSpec(aScriptSpec)
+     , mCacheName(aCacheName)
+     , mState(ServiceWorkerState::EndGuard_)
+     , mServiceWorkerID(GetNextID())
++    , mSkipWaitingFlag(false)
+   {
+     MOZ_ASSERT(mRegistration);
+     MOZ_ASSERT(!aCacheName.IsEmpty());
+   }
+ 
+   ServiceWorkerState
+   State() const
+   {
+@@ -281,16 +292,23 @@ public:
+   }
+ 
+   uint64_t
+   ID() const
+   {
+     return mServiceWorkerID;
+   }
+ 
++  bool
++  SkipWaitingFlag() const
++  {
++    AssertIsOnMainThread();
++    return mSkipWaitingFlag;
++  }
++
+   void
+   UpdateState(ServiceWorkerState aState);
+ 
+   // Only used to set initial state when loading from disk!
+   void
+   SetActivateStateUncheckedWithoutEvent(ServiceWorkerState aState)
+   {
+     mState = aState;
+@@ -412,16 +430,19 @@ public:
+ 
+   void
+   MaybeClaimClient(nsIDocument* aDocument,
+                    ServiceWorkerRegistrationInfo* aWorkerRegistration);
+ 
+   nsresult
+   ClaimClients(const nsCString& aScope, WorkerPrivate* aWorkerPrivate);
+ 
++  nsresult
++  FlipSkipWaitingFlag(const nsCString& aScope, WorkerPrivate* aWorkerPrivate);
++
+   static already_AddRefed<ServiceWorkerManager>
+   GetInstance();
+ 
+  void LoadRegistrations(
+                  const nsTArray<ServiceWorkerRegistrationData>& aRegistrations);
+ 
+   NS_IMETHOD
+   AddRegistrationEventListener(const nsAString& aScope,
 diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 --- a/dom/workers/WorkerScope.cpp
 +++ b/dom/workers/WorkerScope.cpp
-@@ -968,16 +968,44 @@ ServiceWorkerGlobalScope::Unregister(Err
-   // soon anyway.
-   if (runnable->WorkerPromise()) {
-     NS_DispatchToMainThread(runnable);
+@@ -480,16 +480,122 @@ ServiceWorkerGlobalScope::Registration()
+   if (!mRegistration) {
+     mRegistration =
+       new ServiceWorkerRegistrationWorkerThread(mWorkerPrivate, mScope);
    }
  
-   return promise.forget();
+   return mRegistration;
  }
  
-+class WorkerScopeSkipWaitingRunnable final : public nsRunnable
++namespace {
++ 
++class WorkerScopeSkipWaitingRunnable;
++class SkipWaitingResultRunnable final : public WorkerRunnable
 +{
 +public:
++
++  SkipWaitingResultRunnable(WorkerPrivate* aWorkerPrivate,
++                            WorkerScopeSkipWaitingRunnable* aRunnable,
++                            nsresult aResult)
++    : WorkerRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount)
++    , mRunnable(aRunnable)
++    , mResult(aResult)
++  {
++    MOZ_ASSERT(NS_IsMainThread());
++    MOZ_ASSERT(mRunnable);
++  }
++
++  virtual bool
++  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override;
++
++private:
++  nsRefPtr<WorkerScopeSkipWaitingRunnable> mRunnable;
++  nsresult mResult;
++};
++
++class WorkerScopeSkipWaitingRunnable final : public nsRunnable
++{
++  WorkerPrivate* mWorkerPrivate;
++  // Worker thread only.
++  nsRefPtr<Promise> mWorkerPromise;
++  nsCString mScope;
++
++public:
++
++  WorkerScopeSkipWaitingRunnable(WorkerPrivate* aWorkerPrivate,
++                                 Promise* aWorkerPromise,
++                                 const nsCString& aScope)
++    : mWorkerPrivate(aWorkerPrivate)
++    , mWorkerPromise(aWorkerPromise)
++    , mScope(aScope)
++  {
++    MOZ_ASSERT(aWorkerPrivate);
++    aWorkerPrivate->AssertIsOnWorkerThread();
++    MOZ_ASSERT(aWorkerPromise);
++  }
++
++  Promise*
++  WorkerPromise() const
++  {
++    mWorkerPrivate->AssertIsOnWorkerThread();
++    return mWorkerPromise;
++  }
++
 +  NS_IMETHODIMP
 +  Run() override
 +  {
 +    AssertIsOnMainThread();
++    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++    MOZ_ASSERT(swm);
++
++    nsresult rv = swm->FlipSkipWaitingFlag(mScope, mWorkerPrivate);
++
++    nsRefPtr<SkipWaitingResultRunnable> runnable =
++      new SkipWaitingResultRunnable(mWorkerPrivate, this, rv);
++    runnable->Dispatch(nullptr);
 +
 +    return NS_OK;
 +  }
 +};
++
++bool
++SkipWaitingResultRunnable::WorkerRun(JSContext* aCx,
++                                     WorkerPrivate* aWorkerPrivate)
++{
++  if (!NS_FAILED(mResult)) {
++    mRunnable->WorkerPromise()->MaybeResolve(JS::UndefinedHandleValue);
++  } else {
++    mRunnable->WorkerPromise()->MaybeReject(mResult);
++  }
++
++  return true;
++}
++
++}
 +
 +already_AddRefed<Promise>
 +ServiceWorkerGlobalScope::SkipWaiting(ErrorResult& aRv)
@@ -61,39 +328,229 @@ diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 +    return nullptr;
 +  }
 +
-+  // Figure out how to skip waiting here.
++  nsRefPtr<WorkerScopeSkipWaitingRunnable> runnable =
++    new WorkerScopeSkipWaitingRunnable(mWorkerPrivate,
++                                       promise,
++                                       NS_ConvertUTF16toUTF8(mScope));
++  NS_DispatchToMainThread(runnable);
 +
 +  return promise.forget();
 +}
 +
- namespace {
- 
- class UpdateRunnable final : public nsRunnable
+ WorkerDebuggerGlobalScope::WorkerDebuggerGlobalScope(
+                                                   WorkerPrivate* aWorkerPrivate)
+ : mWorkerPrivate(aWorkerPrivate)
  {
-   nsString mScope;
+   mWorkerPrivate->AssertIsOnWorkerThread();
+ }
  
- public:
-   explicit UpdateRunnable(const nsAString& aScope)
+ WorkerDebuggerGlobalScope::~WorkerDebuggerGlobalScope()
 diff --git a/dom/workers/WorkerScope.h b/dom/workers/WorkerScope.h
 --- a/dom/workers/WorkerScope.h
 +++ b/dom/workers/WorkerScope.h
-@@ -219,16 +219,19 @@ public:
+@@ -221,16 +221,19 @@ public:
    }
  
-   void
-   Update();
+   ServiceWorkerClients*
+   Clients();
  
-   already_AddRefed<Promise>
-   Unregister(ErrorResult& aRv);
+   ServiceWorkerRegistrationWorkerThread*
+   Registration();
  
 +  already_AddRefed<Promise>
 +  SkipWaiting(ErrorResult& aRv);
 +
-   ServiceWorkerClients*
-   Clients();
- 
    IMPL_EVENT_HANDLER(activate)
    IMPL_EVENT_HANDLER(beforeevicted)
    IMPL_EVENT_HANDLER(evicted)
    IMPL_EVENT_HANDLER(fetch)
    IMPL_EVENT_HANDLER(install)
+   IMPL_EVENT_HANDLER(message)
+ 
+   IMPL_EVENT_HANDLER(push)
+diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
+--- a/dom/workers/test/serviceworkers/mochitest.ini
++++ b/dom/workers/test/serviceworkers/mochitest.ini
+@@ -75,16 +75,18 @@ support-files =
+   worker_updatefoundevent.js
+   worker_updatefoundevent2.js
+   updatefoundevent.html
+   empty.js
+   periodic.sjs
+   periodic/frame.html
+   periodic/register.html
+   periodic/unregister.html
++  skip_waiting_installed_worker.js
++  skip_waiting_scope/index.html
+ 
+ [test_unregister.html]
+ [test_installation_simple.html]
+ [test_fetch_event.html]
+ skip-if = os != "linux" # Bug 1136780
+ [test_https_fetch.html]
+ [test_https_fetch_cloned_response.html]
+ [test_match_all.html]
+@@ -108,8 +110,9 @@ skip-if = os != "linux" # Bug 1136780
+ [test_importscript.html]
+ [test_client_focus.html]
+ [test_claim_oninstall.html]
+ [test_claim.html]
+ [test_bug1151916.html]
+ [test_workerupdatefoundevent.html]
+ [test_empty_serviceworker.html]
+ [test_periodic_update.html]
++[test_skip_waiting.html]
+diff --git a/dom/workers/test/serviceworkers/skip_waiting_installed_worker.js b/dom/workers/test/serviceworkers/skip_waiting_installed_worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/skip_waiting_installed_worker.js
+@@ -0,0 +1,6 @@
++/* Any copyright is dedicated to the Public Domain.
++ * http://creativecommons.org/publicdomain/zero/1.0/ */
++
++self.addEventListener('install', evt => {
++  evt.waitUntil(self.skipWaiting());
++});
+diff --git a/dom/workers/test/serviceworkers/skip_waiting_scope/index.html b/dom/workers/test/serviceworkers/skip_waiting_scope/index.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/skip_waiting_scope/index.html
+@@ -0,0 +1,37 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1131352 - Add ServiceWorkerGlobalScope skipWaiting()</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++
++  if (!parent) {
++    info("skip_waiting_scope/index.html shouldn't be launched directly!");
++  }
++
++  navigator.serviceWorker.ready.then(function() {
++    parent.postMessage("READY", "*");
++  });
++
++  navigator.serviceWorker.oncontrollerchange = function() {
++    parent.postMessage({
++      event: "controllerchange",
++      controllerScriptURL: navigator.serviceWorker.controller &&
++                           navigator.serviceWorker.controller.scriptURL
++    }, "*");
++  }
++
++</script>
++</pre>
++</body>
++</html>
+diff --git a/dom/workers/test/serviceworkers/test_skip_waiting.html b/dom/workers/test/serviceworkers/test_skip_waiting.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/test_skip_waiting.html
+@@ -0,0 +1,96 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1131352 - Add ServiceWorkerGlobalScope skipWaiting()</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++  var registration, iframe, content;
++
++  function start() {
++    return navigator.serviceWorker.register("worker.js",
++                                            {scope: "./skip_waiting_scope/"});
++  }
++
++  function waitForActivated(swr) {
++    registration = swr;
++    var promise = new Promise(function(resolve, reject) {
++      window.onmessage = function(e) {
++        if (e.data === "READY") {
++          ok(true, "Active worker is activated now");
++          resolve();
++        } else {
++          ok(false, "Wrong value. Somenting went wrong");
++          resolve();
++        }
++      }
++    });
++
++    iframe = document.createElement("iframe");
++    iframe.setAttribute("src", "skip_waiting_scope/index.html");
++
++    content = document.getElementById("content");
++    content.appendChild(iframe);
++
++    return promise;
++  }
++
++  function register() {
++    return navigator.serviceWorker.register("skip_waiting_installed_worker.js",
++                                            {scope: "./skip_waiting_scope/"});
++  }
++
++  function checkWhetherItSkipedWaiting(swr) {
++    registration = swr;
++    var promise = new Promise(function(resolve, reject) {
++      window.onmessage = function (evt) {
++        if (evt.data.event === "controllerchange") {
++          ok(evt.data.controllerScriptURL.match("skip_waiting_installed_worker"),
++             "The controller changed after skiping the waiting step");
++          resolve();
++        } else {
++          ok(false, "Wrong value. Somenting went wrong");
++          resolve();
++        }
++      };
++    });
++
++    return promise;
++  }
++
++  function clean() {
++    content.removeChild(iframe);
++
++    return registration.unregister();
++  }
++
++  function runTest() {
++    start()
++      .then(waitForActivated)
++      .then(register)
++      .then(checkWhetherItSkipedWaiting)
++      .then(clean)
++      .catch(function(e) {
++        ok(false, "Some test failed with error " + e);
++      }).then(SimpleTest.finish);
++  }
++
++  SimpleTest.waitForExplicitFinish();
++  SpecialPowers.pushPrefEnv({"set": [
++    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++    ["dom.serviceWorkers.enabled", true],
++    ["dom.serviceWorkers.testing.enabled", true]
++  ]}, runTest);
++</script>
++</pre>
++</body>
++</html>
