@@ -1,0 +1,27 @@
+# HG changeset patch
+# Parent 4744bf511a0b628205a235d6b04de53fde0cb363
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+Bug 1159407 - JavaScript error at aboutServiceWorkers.js when updating the service worker via about:serviceworkers page. r=baku
+
+diff --git a/toolkit/content/aboutServiceWorkers.js b/toolkit/content/aboutServiceWorkers.js
+--- a/toolkit/content/aboutServiceWorkers.js
++++ b/toolkit/content/aboutServiceWorkers.js
+@@ -127,17 +127,17 @@ function display(info) {
+     error => {
+       dump("about:serviceworkers - push registration failed\n");
+     }
+   );
+ 
+   let updateButton = document.createElement("button");
+   updateButton.appendChild(document.createTextNode(bundle.GetStringFromName('update')));
+   updateButton.onclick = function() {
+-    gSWM.update(info.scope);
++    gSWM.softUpdate(info.scope);
+   };
+   div.appendChild(updateButton);
+ 
+   let unregisterButton = document.createElement("button");
+   unregisterButton.appendChild(document.createTextNode(bundle.GetStringFromName('unregister')));
+   div.appendChild(unregisterButton);
+ 
+   let loadingMessage = document.createElement('span');
