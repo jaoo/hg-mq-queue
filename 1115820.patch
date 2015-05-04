@@ -1,12 +1,12 @@
 # HG changeset patch
-# Parent 1a66e629b01470a269d8ead9d76b2f38ca24912b
+# Parent 8ea61086abd04f35e2e4e6f370fff9a170e72b00
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1115820 - Add telemetry to ServiceWorkers. r=nsm
 
 diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
 --- a/dom/workers/RuntimeService.cpp
 +++ b/dom/workers/RuntimeService.cpp
-@@ -1684,16 +1684,22 @@ RuntimeService::UnregisterWorker(JSConte
+@@ -1685,16 +1685,22 @@ RuntimeService::UnregisterWorker(JSConte
      }
  
      if (!domainInfo->ActiveWorkerCount()) {
@@ -32,25 +32,25 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -16,16 +16,17 @@
- #include "nsIMutableArray.h"
+@@ -17,16 +17,17 @@
  #include "nsPIDOMWindow.h"
  #include "nsScriptLoader.h"
  #include "nsDebug.h"
  
  #include "jsapi.h"
  
+ #include "mozilla/ErrorNames.h"
  #include "mozilla/LoadContext.h"
 +#include "mozilla/Telemetry.h"
  #include "mozilla/dom/BindingUtils.h"
  #include "mozilla/dom/DOMError.h"
  #include "mozilla/dom/ErrorEvent.h"
  #include "mozilla/dom/Headers.h"
- #include "mozilla/dom/InstallEventBinding.h"
  #include "mozilla/dom/InternalHeaders.h"
  #include "mozilla/dom/Navigator.h"
  #include "mozilla/dom/PromiseNativeHandler.h"
-@@ -602,16 +603,19 @@ public:
+ #include "mozilla/dom/Request.h"
+@@ -607,16 +608,19 @@ public:
      }
  
      if (aInCacheAndEqual) {
@@ -70,7 +70,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      if (NS_WARN_IF(NS_FAILED(rv))) {
        Fail(NS_ERROR_DOM_SECURITY_ERR);
        return;
-@@ -997,16 +1001,19 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -1004,16 +1008,19 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    nsRefPtr<ServiceWorkerResolveWindowPromiseOnUpdateCallback> cb =
      new ServiceWorkerResolveWindowPromiseOnUpdateCallback(window, promise);
@@ -90,7 +90,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerManager::AppendPendingOperation(ServiceWorkerJobQueue* aQueue,
                                               ServiceWorkerJob* aJob)
  {
-@@ -2150,16 +2157,17 @@ ServiceWorkerManager::MaybeStartControll
+@@ -2161,16 +2168,17 @@ ServiceWorkerManager::MaybeStartControll
    nsRefPtr<ServiceWorkerRegistrationInfo> registration =
      GetServiceWorkerRegistrationInfo(aDoc);
    if (registration) {
@@ -111,36 +111,75 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
-@@ -7975,10 +7975,32 @@
+@@ -7468,22 +7468,22 @@
+     "n_values": 3,
+     "description": "Doorhanger shown = 0, Disable = 1, Enable = 2"
+   },
+   "SERVICE_WORKER_REGISTRATION_LOADING": {
+     "expires_in_version": "never",
+     "kind": "exponential",
+     "high": "5000",
+     "n_buckets": 20,
+-    "description": "Tracking how ServiceWorkerRegistrar loads data before the first content is shown"
++    "description": "Tracking how ServiceWorkerRegistrar loads data before the first content is shown. File bugs in Core::DOM in case of a Telemetry regression."
+   },
+   "SERVICE_WORKER_REQUEST_PASSTHROUGH": {
+     "expires_in_version": "50",
+     "kind": "boolean",
+-    "description": "Intercepted fetch sending back same Request object."
++    "description": "Intercepted fetch sending back same Request object. File bugs in Core::DOM in case of a Telemetry regression."
+   },
+   "LOOP_CLIENT_CALL_URL_REQUESTS_SUCCESS": {
+     "expires_in_version": "never",
+     "kind": "boolean",
+     "description": "Stores 1 if generating a call URL succeeded, and 0 if it failed."
+   },
+   "LOOP_CLIENT_CALL_URL_SHARED": {
+     "expires_in_version": "never",
+@@ -7968,21 +7968,43 @@
+     "kind": "exponential",
+     "high": "60000",
+     "n_buckets": 30,
+     "description": "Time PR_Close of a UDP socket taken (ms)"
+   },
+   "SERVICE_WORKER_SPAWN_ATTEMPTS": {
      "expires_in_version": "50",
      "kind": "count",
-     "description": "Count ServiceWorkers that really did get a thread created for them"
+-    "description": "Count attempts to spawn a ServiceWorker for a domain"
++    "description": "Count attempts to spawn a ServiceWorker for a domain. File bugs in Core::DOM in case of a Telemetry regression."
+   },
+   "SERVICE_WORKER_WAS_SPAWNED": {
+     "expires_in_version": "50",
+     "kind": "count",
+-    "description": "Count ServiceWorkers that really did get a thread created for them"
++    "description": "Count ServiceWorkers that really did get a thread created for them. File bugs in Core::DOM in case of a Telemetry regression."
    },
    "SERVICE_WORKER_SPAWN_GETS_QUEUED": {
      "expires_in_version": "50",
      "kind": "count",
-     "description": "Tracking whether a ServiceWorker spawn gets queued due to hitting max workers per domain limit"
+-    "description": "Tracking whether a ServiceWorker spawn gets queued due to hitting max workers per domain limit"
++    "description": "Tracking whether a ServiceWorker spawn gets queued due to hitting max workers per domain limit. File bugs in Core::DOM in case of a Telemetry regression."
 +  },
 +  "SERVICE_WORKER_REGISTRATIONS": {
 +    "expires_in_version": "50",
 +    "kind": "count",
-+    "description": "Count how many registrations occurs."
++    "description": "Count how many registrations occurs. File bugs in Core::DOM in case of a Telemetry regression."
 +  },
 +  "SERVICE_WORKER_CONTROLLED_DOCUMENTS": {
 +    "expires_in_version": "50",
 +    "kind": "count",
-+    "description": "Count whenever a document is controlled."
++    "description": "Count whenever a document is controlled. File bugs in Core::DOM in case of a Telemetry regression."
 +  },
 +  "SERVICE_WORKER_UPDATED": {
 +    "expires_in_version": "50",
 +    "kind": "count",
-+    "description": "Count ServiceWorkers scripts that are updated."
++    "description": "Count ServiceWorkers scripts that are updated. File bugs in Core::DOM in case of a Telemetry regression."
 +  },
 +  "SERVICE_WORKER_LIFE_TIME": {
 +    "expires_in_version": "50",
 +    "kind": "exponential",
 +    "high": "120000",
 +    "n_buckets": 20,
-+    "description": "Tracking how long a ServiceWorker stays alive after it is spawned"
++    "description": "Tracking how long a ServiceWorker stays alive after it is spawned. File bugs in Core::DOM in case of a Telemetry regression."
    }
  }
