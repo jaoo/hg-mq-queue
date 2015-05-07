@@ -1,26 +1,23 @@
 # HG changeset patch
-# Parent 3de89bd361c3c68adc7b959823e34d5ca29abf2d
+# Parent dc5f85980a828aaa32b599b15b93ab8d1287ff5b
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
 Bug XXXXXXX: Enable some prefs for testing. r=me
 
 diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
 --- a/modules/libpref/init/all.js
 +++ b/modules/libpref/init/all.js
-@@ -131,17 +131,20 @@ pref("dom.workers.maxPerDomain", 20);
- 
- // Whether or not Shared Web Workers are enabled.
- pref("dom.workers.sharedWorkers.enabled", true);
- 
- // WebSocket in workers are disabled by default.
+@@ -136,16 +136,19 @@ pref("dom.workers.sharedWorkers.enabled"
+ // Note: we need this pref because WebSocket in Workers is a new implementation
+ // and we want to be able to disable it quickly in case of regressions.
+ // When this feature is stable enough we can get rid of this pref: Bug 1159792
  pref("dom.workers.websocket.enabled", true);
  
  // Service workers
--pref("dom.serviceWorkers.enabled", false);
-+pref("dom.serviceWorkers.enabled", true);
-+
+ pref("dom.serviceWorkers.enabled", false);
+ 
 +// Service worker testing
 +pref("dom.serviceWorkers.testing.enabled", true);
- 
++
  // Whether nonzero values can be returned from performance.timing.*
  pref("dom.enable_performance", true);
  
@@ -28,17 +25,18 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  pref("dom.enable_resource_timing", true);
  
  // Enable high-resolution timing markers for users
-@@ -760,17 +763,17 @@ pref("toolkit.autocomplete.richBoundaryC
- pref("toolkit.osfile.log", false);
- 
+ pref("dom.enable_user_timing", true);
+@@ -768,17 +771,17 @@ pref("toolkit.osfile.log", false);
  pref("toolkit.scrollbox.smoothScroll", true);
  pref("toolkit.scrollbox.scrollIncrement", 20);
  pref("toolkit.scrollbox.verticalScrollDistance", 3);
  pref("toolkit.scrollbox.horizontalScrollDistance", 5);
  pref("toolkit.scrollbox.clickToScroll.scrollDelay", 150);
  
+ // Telemetry settings.
+ // Server to submit telemetry pings to.
 -pref("toolkit.telemetry.server", "https://incoming.telemetry.mozilla.org");
-+pref("toolkit.telemetry.server", "http://web.edvac:8080");
++pref("toolkit.telemetry.server", "");
  // Telemetry server owner. Please change if you set toolkit.telemetry.server to a different server
  pref("toolkit.telemetry.server_owner", "Mozilla");
  // Information page about telemetry (temporary ; will be about:telemetry in the end)
@@ -46,18 +44,18 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  // Determines whether full SQL strings are returned when they might contain sensitive info
  // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
  pref("toolkit.telemetry.debugSlowSql", false);
- // Determines if Telemetry pings can be archived locally.
-@@ -785,17 +788,17 @@ pref("toolkit.asyncshutdown.timeout.cras
+ // Whether to use the unified telemetry behavior, requires a restart.
+@@ -793,17 +796,17 @@ pref("toolkit.asyncshutdown.timeout.cras
  
  // Enable deprecation warnings.
  pref("devtools.errorconsole.deprecation_warnings", true);
  
  // Disable debugging chrome
  #ifdef MOZ_DEV_EDITION
- pref("devtools.chrome.enabled", true);
+ sticky_pref("devtools.chrome.enabled", true);
  #else
--pref("devtools.chrome.enabled", false);
-+pref("devtools.chrome.enabled", true);
+-sticky_pref("devtools.chrome.enabled", false);
++sticky_pref("devtools.chrome.enabled", true);
  #endif
  
  // Disable remote debugging protocol logging
@@ -65,8 +63,8 @@ diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
  pref("devtools.debugger.log.verbose", false);
  // Disable remote debugging connections
  #ifdef MOZ_DEV_EDITION
- pref("devtools.debugger.remote-enabled", true);
-@@ -1108,17 +1111,17 @@ pref("network.notify.changed", true);
+ sticky_pref("devtools.debugger.remote-enabled", true);
+@@ -1116,17 +1119,17 @@ pref("network.notify.changed", true);
  
  // Transmit UDP busy-work to the LAN when anticipating low latency
  // network reads and on wifi to mitigate 802.11 Power Save Polling delays

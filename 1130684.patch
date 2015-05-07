@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent b37ff4ab664cd9586fa737b224e57c0e79d3f6c1
+# Parent bfcfab67a0d84bce900c780b4c6ff277bccfdeb3
 # User Catalin Badea <catalin.badea392@gmail.com>
 
 Bug 1130684 - Implement Service Worker clients.claim.
@@ -257,7 +257,7 @@ diff --git a/dom/workers/ServiceWorkerContainer.h b/dom/workers/ServiceWorkerCon
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -2149,36 +2149,51 @@ ServiceWorkerManager::MaybeStartControll
+@@ -2166,36 +2166,51 @@ ServiceWorkerManager::MaybeStartControll
      GetServiceWorkerRegistrationInfo(aDoc);
    if (registration) {
      MOZ_ASSERT(!mControlledDocuments.Contains(aDoc));
@@ -317,7 +317,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerManager::GetScopeForUrl(const nsAString& aUrl, nsAString& aScope)
  {
    nsCOMPtr<nsIURI> uri;
-@@ -2723,16 +2738,17 @@ ServiceWorkerManager::CreateServiceWorke
+@@ -2740,16 +2755,17 @@ ServiceWorkerManager::CreateServiceWorke
                            nullptr, nullptr);
    if (NS_WARN_IF(NS_FAILED(rv))) {
      return rv;
@@ -335,7 +335,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
    info.mPrincipal = aPrincipal;
  
-@@ -2868,16 +2884,40 @@ EnumControlledDocuments(nsISupports* aKe
+@@ -2885,16 +2901,40 @@ EnumControlledDocuments(nsISupports* aKe
    }
  
    ServiceWorkerClientInfo clientInfo(document);
@@ -376,7 +376,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
    AssertIsOnMainThread();
  
    ServiceWorkerRegistrationInfo* contextReg = static_cast<ServiceWorkerRegistrationInfo*>(aData);
-@@ -2885,35 +2925,30 @@ FireControllerChangeOnMatchingDocument(n
+@@ -2902,35 +2942,30 @@ FireControllerChangeOnMatchingDocument(n
      return PL_DHASH_NEXT;
    }
  
@@ -426,7 +426,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  void
  ServiceWorkerManager::GetAllClients(const nsCString& aScope,
                                      nsTArray<ServiceWorkerClientInfo>& aControlledDocuments)
-@@ -2926,16 +2961,90 @@ ServiceWorkerManager::GetAllClients(cons
+@@ -2943,16 +2978,90 @@ ServiceWorkerManager::GetAllClients(cons
    }
  
    FilterRegistrationData data(aControlledDocuments, registration);
@@ -517,7 +517,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerRegistrationInfo*
  ServiceWorkerManager::CreateNewRegistration(const nsCString& aScope,
                                              nsIPrincipal* aPrincipal)
-@@ -3187,9 +3296,18 @@ ServiceWorkerInfo::UpdateState(ServiceWo
+@@ -3204,9 +3313,18 @@ ServiceWorkerInfo::UpdateState(ServiceWo
    // Activated can only go to redundant.
    MOZ_ASSERT_IF(mState == ServiceWorkerState::Activated, aState == ServiceWorkerState::Redundant);
  #endif
@@ -683,7 +683,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
 diff --git a/dom/workers/WorkerPrivate.cpp b/dom/workers/WorkerPrivate.cpp
 --- a/dom/workers/WorkerPrivate.cpp
 +++ b/dom/workers/WorkerPrivate.cpp
-@@ -2240,16 +2240,17 @@ PRThreadFromThread(nsIThread* aThread)
+@@ -2241,16 +2241,17 @@ PRThreadFromThread(nsIThread* aThread)
  NS_IMPL_ISUPPORTS_INHERITED0(MainThreadReleaseRunnable, nsRunnable)
  
  NS_IMPL_ISUPPORTS_INHERITED0(TopLevelWorkerFinishedRunnable, nsRunnable)
@@ -701,7 +701,7 @@ diff --git a/dom/workers/WorkerPrivate.cpp b/dom/workers/WorkerPrivate.cpp
    , mIsInPrivilegedApp(false)
    , mIsInCertifiedApp(false)
    , mIndexedDBAllowed(false)
-@@ -2293,16 +2294,17 @@ WorkerLoadInfo::StealFrom(WorkerLoadInfo
+@@ -2294,16 +2295,17 @@ WorkerLoadInfo::StealFrom(WorkerLoadInfo
    aOther.mInterfaceRequestor.swap(mInterfaceRequestor);
  
    MOZ_ASSERT(!mPrincipalInfo);
@@ -722,7 +722,7 @@ diff --git a/dom/workers/WorkerPrivate.cpp b/dom/workers/WorkerPrivate.cpp
 diff --git a/dom/workers/WorkerPrivate.h b/dom/workers/WorkerPrivate.h
 --- a/dom/workers/WorkerPrivate.h
 +++ b/dom/workers/WorkerPrivate.h
-@@ -461,16 +461,22 @@ public:
+@@ -462,16 +462,22 @@ public:
    }
  
    uint64_t
@@ -748,13 +748,13 @@ diff --git a/dom/workers/WorkerPrivate.h b/dom/workers/WorkerPrivate.h
 diff --git a/dom/workers/Workers.h b/dom/workers/Workers.h
 --- a/dom/workers/Workers.h
 +++ b/dom/workers/Workers.h
-@@ -239,16 +239,17 @@ struct WorkerLoadInfo
-   nsRefPtr<InterfaceRequestor> mInterfaceRequestor;
- 
+@@ -241,16 +241,17 @@ struct WorkerLoadInfo
    nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
    nsCString mDomain;
  
    nsString mServiceWorkerCacheName;
+ 
+   nsCString mSecurityInfo;
  
    uint64_t mWindowID;
 +  uint64_t mServiceWorkerID;
@@ -928,7 +928,7 @@ diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/se
    empty.js
    periodic.sjs
    periodic/frame.html
-@@ -98,12 +102,14 @@ skip-if = os != "linux" # Bug 1136780
+@@ -98,12 +102,14 @@ support-files =
  [test_close.html]
  [test_serviceworker_interfaces.html]
  [test_serviceworker_not_sharedworker.html]
