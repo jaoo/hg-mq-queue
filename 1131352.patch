@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 14185c7a4a3554137f6a6954f3c055d418058e6a
+# Parent 0c28ac8941853bc0cfe05a1bfc182555ca16e3ee
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
 Bug 1131352 - Add ServiceWorkerGlobalScope skipWaiting(). r=nsm
 
@@ -29,7 +29,7 @@ diff --git a/dom/webidl/ServiceWorkerGlobalScope.webidl b/dom/webidl/ServiceWork
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -854,18 +854,21 @@ private:
+@@ -857,18 +857,21 @@ private:
        }
      }
  
@@ -53,7 +53,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
  NS_IMPL_ISUPPORTS_INHERITED0(ServiceWorkerRegisterJob, ServiceWorkerJob);
  
-@@ -1142,48 +1145,59 @@ LifecycleEventWorkerRunnable::DispatchLi
+@@ -1145,49 +1148,57 @@ LifecycleEventWorkerRunnable::DispatchLi
      new LifecycleEventPromiseHandler(mTask, mServiceWorker, false /* activateImmediately */);
    waitUntilPromise->AppendNativeHandler(handler);
    return true;
@@ -77,7 +77,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  void
 +ServiceWorkerRegistrationInfo::PurgeActiveWorker()
 +{
-+  nsRefPtr<ServiceWorkerInfo> exitingWorker = mActiveWorker;
++  nsRefPtr<ServiceWorkerInfo> exitingWorker = mActiveWorker.forget();
 +  if (!exitingWorker)
 +    return;
 +
@@ -96,15 +96,15 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerRegistrationInfo::Activate()
  {
    nsRefPtr<ServiceWorkerInfo> activatingWorker = mWaitingWorker;
-   nsRefPtr<ServiceWorkerInfo> exitingWorker = mActiveWorker;
- 
-   nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-   swm->InvalidateServiceWorkerRegistrationWorker(this, WhichServiceWorker::WAITING_WORKER | WhichServiceWorker::ACTIVE_WORKER);
+-  nsRefPtr<ServiceWorkerInfo> exitingWorker = mActiveWorker;
+-
+-  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+-  swm->InvalidateServiceWorkerRegistrationWorker(this, WhichServiceWorker::WAITING_WORKER | WhichServiceWorker::ACTIVE_WORKER);
    if (!activatingWorker) {
      return;
    }
  
-   if (exitingWorker) {
+-  if (exitingWorker) {
 -    // FIXME(nsm): Wait for worker.
 -    // Terminate worker
 -    exitingWorker->UpdateState(ServiceWorkerState::Redundant);
@@ -113,8 +113,11 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 -    if (NS_FAILED(rv)) {
 -      NS_WARNING("Failed to purge the activating cache.");
 -    }
-+    PurgeActiveWorker();
-   }
+-  }
++  PurgeActiveWorker();
++
++  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++  swm->InvalidateServiceWorkerRegistrationWorker(this, WhichServiceWorker::WAITING_WORKER);
  
    mActiveWorker = activatingWorker.forget();
    mWaitingWorker = nullptr;
@@ -122,7 +125,8 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
    // FIXME(nsm): Unlink appcache if there is one.
  
-@@ -3051,16 +3065,38 @@ ServiceWorkerManager::ClaimClients(const
+   swm->CheckPendingReadyPromises();
+@@ -3051,16 +3062,41 @@ ServiceWorkerManager::ClaimClients(const
      return NS_ERROR_DOM_INVALID_STATE_ERR;
    }
  
@@ -133,7 +137,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
 +nsresult
 +ServiceWorkerManager::SetSkipWaitingFlag(const nsCString& aScope,
-+                                         const uint64_t aServiceWorkerID)
++                                         uint64_t aServiceWorkerID)
 +{
 +  nsRefPtr<ServiceWorkerRegistrationInfo> registration = GetRegistration(aScope);
 +  if (!registration) {
@@ -146,6 +150,9 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +  } else if (registration->mWaitingWorker &&
 +             (registration->mWaitingWorker->ID() == aServiceWorkerID)) {
 +    registration->mWaitingWorker->SetSkipWaitingFlag();
++    if (registration->mWaitingWorker->State() == ServiceWorkerState::Installed) {
++      registration->TryToActivate();
++    }
 +  } else {
 +    return NS_ERROR_FAILURE;
 +  }
@@ -164,7 +171,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManager.h
 --- a/dom/workers/ServiceWorkerManager.h
 +++ b/dom/workers/ServiceWorkerManager.h
-@@ -187,16 +187,19 @@ public:
+@@ -189,16 +189,19 @@ public:
    {
      return mActiveWorker && mControlledDocumentsCounter > 0;
    }
@@ -184,7 +191,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    void
    FinishActivate(bool aSuccess);
  
-@@ -220,16 +223,17 @@ private:
+@@ -222,16 +225,17 @@ private:
    // workers to their corresponding serviceWorkerInfo.
    uint64_t mServiceWorkerID;
  
@@ -202,7 +209,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    // invalid.
    uint64_t
    GetNextID() const;
-@@ -250,24 +254,38 @@ public:
+@@ -252,24 +256,37 @@ public:
    }
  
    void SetScriptSpec(const nsCString& aSpec)
@@ -214,8 +221,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
 -  explicit ServiceWorkerInfo(ServiceWorkerRegistrationInfo* aReg,
 -                             const nsACString& aScriptSpec,
 -                             const nsAString& aCacheName)
-+  bool
-+  SkipWaitingFlag() const
++  bool SkipWaitingFlag() const
 +  {
 +    AssertIsOnMainThread();
 +    return mSkipWaitingFlag;
@@ -244,17 +250,17 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    ServiceWorkerState
    State() const
    {
-@@ -412,16 +430,19 @@ public:
+@@ -414,16 +431,19 @@ public:
  
    void
    MaybeClaimClient(nsIDocument* aDocument,
                     ServiceWorkerRegistrationInfo* aWorkerRegistration);
  
    nsresult
-   ClaimClients(const nsCString& aScope, WorkerPrivate* aWorkerPrivate);
+   ClaimClients(const nsCString& aScope, uint64_t aId);
  
 +  nsresult
-+  SetSkipWaitingFlag(const nsCString& aScope, const uint64_t aServiceWorkerID);
++  SetSkipWaitingFlag(const nsCString& aScope, uint64_t aServiceWorkerID);
 +
    static already_AddRefed<ServiceWorkerManager>
    GetInstance();
@@ -267,7 +273,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
 diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 --- a/dom/workers/WorkerScope.cpp
 +++ b/dom/workers/WorkerScope.cpp
-@@ -480,16 +480,138 @@ ServiceWorkerGlobalScope::Registration()
+@@ -482,16 +482,135 @@ ServiceWorkerGlobalScope::Registration()
    if (!mRegistration) {
      mRegistration =
        new ServiceWorkerRegistrationWorkerThread(mWorkerPrivate, mScope);
@@ -281,15 +287,12 @@ diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 +class SkipWaitingResultRunnable final : public WorkerRunnable
 +{
 +  nsRefPtr<PromiseWorkerProxy> mPromiseProxy;
-+  nsresult mResult;
 +
 +public:
 +  SkipWaitingResultRunnable(WorkerPrivate* aWorkerPrivate,
-+                            PromiseWorkerProxy* aPromiseProxy,
-+                            nsresult aResult)
++                            PromiseWorkerProxy* aPromiseProxy)
 +    : WorkerRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount)
 +    , mPromiseProxy(aPromiseProxy)
-+    , mResult(aResult)
 +  {
 +    AssertIsOnMainThread();
 +  }
@@ -303,11 +306,7 @@ diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 +    Promise* promise = mPromiseProxy->GetWorkerPromise();
 +    MOZ_ASSERT(promise);
 +
-+    if (!NS_FAILED(mResult)) {
-+      promise->MaybeResolve(JS::UndefinedHandleValue);
-+    } else {
-+      promise->MaybeReject(mResult);
-+    }
++    promise->MaybeResolve(JS::UndefinedHandleValue);
 +
 +    // Release the reference on the worker thread.
 +    mPromiseProxy->CleanUp(aCx);
@@ -318,16 +317,13 @@ diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 +
 +class WorkerScopeSkipWaitingRunnable final : public nsRunnable
 +{
-+  uint64_t mServiceWorkerID;
 +  nsRefPtr<PromiseWorkerProxy> mPromiseProxy;
 +  nsCString mScope;
 +
 +public:
-+  WorkerScopeSkipWaitingRunnable(const uint64_t aServiceWorkerID,
-+                                 PromiseWorkerProxy* aPromiseProxy,
++  WorkerScopeSkipWaitingRunnable(PromiseWorkerProxy* aPromiseProxy,
 +                                 const nsCString& aScope)
-+    : mServiceWorkerID(aServiceWorkerID)
-+    , mPromiseProxy(aPromiseProxy)
++    : mPromiseProxy(aPromiseProxy)
 +    , mScope(aScope)
 +  {
 +    MOZ_ASSERT(aPromiseProxy);
@@ -339,15 +335,22 @@ diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 +    AssertIsOnMainThread();
 +    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
 +    MOZ_ASSERT(swm);
++
++    MutexAutoLock lock(mPromiseProxy->GetCleanUpLock());
++    if (mPromiseProxy->IsClean()) {
++      return NS_OK;
++    }
 +    WorkerPrivate* workerPrivate = mPromiseProxy->GetWorkerPrivate();
 +    MOZ_ASSERT(workerPrivate);
 +
-+    nsresult rv = swm->SetSkipWaitingFlag(mScope, mServiceWorkerID);
++    swm->SetSkipWaitingFlag(mScope, workerPrivate->ServiceWorkerID());
 +
 +    nsRefPtr<SkipWaitingResultRunnable> runnable =
-+      new SkipWaitingResultRunnable(workerPrivate, mPromiseProxy, rv);
++      new SkipWaitingResultRunnable(workerPrivate, mPromiseProxy);
 +
-+    AutoSafeJSContext cx;
++    AutoJSAPI jsapi;
++    jsapi.Init();
++    JSContext* cx = jsapi.cx();
 +    if (runnable->Dispatch(cx)) {
 +      return NS_OK;
 +    }
@@ -382,12 +385,12 @@ diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 +    PromiseWorkerProxy::Create(mWorkerPrivate, promise);
 +  if (!promiseProxy->GetWorkerPromise()) {
 +    // Don't dispatch if adding the worker feature failed.
++    promise->MaybeResolve(JS::UndefinedHandleValue);
 +    return promise.forget();
 +  }
 +
 +  nsRefPtr<WorkerScopeSkipWaitingRunnable> runnable =
-+    new WorkerScopeSkipWaitingRunnable(mWorkerPrivate->ServiceWorkerID(),
-+                                       promiseProxy,
++    new WorkerScopeSkipWaitingRunnable(promiseProxy,
 +                                       NS_ConvertUTF16toUTF8(mScope));
 +
 +  aRv = NS_DispatchToMainThread(runnable);
@@ -409,7 +412,7 @@ diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 diff --git a/dom/workers/WorkerScope.h b/dom/workers/WorkerScope.h
 --- a/dom/workers/WorkerScope.h
 +++ b/dom/workers/WorkerScope.h
-@@ -221,16 +221,19 @@ public:
+@@ -222,16 +222,19 @@ public:
    }
  
    ServiceWorkerClients*
@@ -433,14 +436,14 @@ diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/se
 --- a/dom/workers/test/serviceworkers/mochitest.ini
 +++ b/dom/workers/test/serviceworkers/mochitest.ini
 @@ -75,16 +75,18 @@ support-files =
-   worker_updatefoundevent.js
-   worker_updatefoundevent2.js
-   updatefoundevent.html
-   empty.js
    periodic.sjs
    periodic/frame.html
    periodic/register.html
    periodic/unregister.html
+   claim_oninstall_worker.js
+   claim_worker_1.js
+   claim_worker_2.js
+   claim_clients/client.html
 +  skip_waiting_installed_worker.js
 +  skip_waiting_scope/index.html
  
@@ -454,12 +457,12 @@ diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/se
 @@ -108,8 +110,9 @@ support-files =
  [test_importscript.html]
  [test_client_focus.html]
- [test_claim_oninstall.html]
- [test_claim.html]
  [test_bug1151916.html]
  [test_workerupdatefoundevent.html]
  [test_empty_serviceworker.html]
  [test_periodic_update.html]
+ [test_claim_oninstall.html]
+ [test_claim.html]
 +[test_skip_waiting.html]
 diff --git a/dom/workers/test/serviceworkers/skip_waiting_installed_worker.js b/dom/workers/test/serviceworkers/skip_waiting_installed_worker.js
 new file mode 100644
@@ -518,7 +521,7 @@ diff --git a/dom/workers/test/serviceworkers/test_skip_waiting.html b/dom/worker
 new file mode 100644
 --- /dev/null
 +++ b/dom/workers/test/serviceworkers/test_skip_waiting.html
-@@ -0,0 +1,96 @@
+@@ -0,0 +1,95 @@
 +<!--
 +  Any copyright is dedicated to the Public Domain.
 +  http://creativecommons.org/publicdomain/zero/1.0/
@@ -565,13 +568,7 @@ new file mode 100644
 +    return promise;
 +  }
 +
-+  function register() {
-+    return navigator.serviceWorker.register("skip_waiting_installed_worker.js",
-+                                            {scope: "./skip_waiting_scope/"});
-+  }
-+
-+  function checkWhetherItSkipedWaiting(swr) {
-+    registration = swr;
++  function checkWhetherItSkippedWaiting() {
 +    var promise = new Promise(function(resolve, reject) {
 +      window.onmessage = function (evt) {
 +        if (evt.data.event === "controllerchange") {
@@ -583,6 +580,12 @@ new file mode 100644
 +          resolve();
 +        }
 +      };
++    });
++
++    navigator.serviceWorker.register("skip_waiting_installed_worker.js",
++                                     {scope: "./skip_waiting_scope/"})
++      .then(swr => {
++        registration = swr;
 +    });
 +
 +    return promise;
@@ -597,8 +600,7 @@ new file mode 100644
 +  function runTest() {
 +    start()
 +      .then(waitForActivated)
-+      .then(register)
-+      .then(checkWhetherItSkipedWaiting)
++      .then(checkWhetherItSkippedWaiting)
 +      .then(clean)
 +      .catch(function(e) {
 +        ok(false, "Some test failed with error " + e);

@@ -1,10 +1,10 @@
 # HG changeset patch
-# Parent bfcfab67a0d84bce900c780b4c6ff277bccfdeb3
 # User Catalin Badea <catalin.badea392@gmail.com>
 
 Bug 1130684 - Implement Service Worker clients.claim.
 
 diff --git a/dom/webidl/Clients.webidl b/dom/webidl/Clients.webidl
+index 1ae5dd6..c000b13 100644
 --- a/dom/webidl/Clients.webidl
 +++ b/dom/webidl/Clients.webidl
 @@ -9,16 +9,17 @@
@@ -25,10 +25,33 @@ diff --git a/dom/webidl/Clients.webidl b/dom/webidl/Clients.webidl
    ClientType type = "window";
  };
  
+diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
+index cf81597..e6c6ed3 100644
+--- a/dom/workers/RuntimeService.cpp
++++ b/dom/workers/RuntimeService.cpp
+@@ -2390,16 +2390,17 @@ RuntimeService::CreateSharedWorkerFromLoadInfo(JSContext* aCx,
+                                                const nsAString& aScriptURL,
+                                                const nsACString& aName,
+                                                WorkerType aType,
+                                                SharedWorker** aSharedWorker)
+ {
+   AssertIsOnMainThread();
+   MOZ_ASSERT(aLoadInfo);
+   MOZ_ASSERT(aLoadInfo->mResolvedScriptURI);
++  MOZ_ASSERT_IF(aType == WorkerTypeService, aLoadInfo->mServiceWorkerID > 0);
+ 
+   nsRefPtr<WorkerPrivate> workerPrivate;
+   {
+     MutexAutoLock lock(mMutex);
+ 
+     WorkerDomainInfo* domainInfo;
+     SharedWorkerInfo* sharedWorkerInfo;
+ 
 diff --git a/dom/workers/ServiceWorkerClients.cpp b/dom/workers/ServiceWorkerClients.cpp
+index dafa84b..749fb5e 100644
 --- a/dom/workers/ServiceWorkerClients.cpp
 +++ b/dom/workers/ServiceWorkerClients.cpp
-@@ -130,16 +130,98 @@ public:
+@@ -131,16 +131,100 @@ public:
      if (!releaseRunnable->Dispatch(cx)) {
        NS_RUNTIMEABORT("Failed to dispatch MatchAll promise control runnable.");
      }
@@ -62,10 +85,10 @@ diff --git a/dom/workers/ServiceWorkerClients.cpp b/dom/workers/ServiceWorkerCli
 +    Promise* promise = mPromiseProxy->GetWorkerPromise();
 +    MOZ_ASSERT(promise);
 +
-+    if (!NS_FAILED(mResult)) {
++    if (NS_SUCCEEDED(mResult)) {
 +      promise->MaybeResolve(JS::UndefinedHandleValue);
 +    } else {
-+      promise->MaybeReject(mResult);
++      promise->MaybeReject(NS_ERROR_DOM_INVALID_STATE_ERR);
 +    }
 +
 +    // Release the reference on the worker thread.
@@ -96,12 +119,14 @@ diff --git a/dom/workers/ServiceWorkerClients.cpp b/dom/workers/ServiceWorkerCli
 +    MOZ_ASSERT(swm);
 +    MOZ_ASSERT(workerPrivate);
 +
-+    nsresult rv = swm->ClaimClients(mScope, workerPrivate);
++    nsresult rv = swm->ClaimClients(mScope, workerPrivate->ServiceWorkerID());
 +
 +    nsRefPtr<ResolveClaimRunnable> r =
 +      new ResolveClaimRunnable(workerPrivate, mPromiseProxy, rv);
 +
-+    AutoSafeJSContext cx;
++    AutoJSAPI jsapi;
++    jsapi.Init();
++    JSContext* cx = jsapi.cx();
 +    if (r->Dispatch(cx)) {
 +      return NS_OK;
 +    }
@@ -127,7 +152,7 @@ diff --git a/dom/workers/ServiceWorkerClients.cpp b/dom/workers/ServiceWorkerCli
  {
    WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
    MOZ_ASSERT(workerPrivate);
-@@ -187,19 +269,38 @@ ServiceWorkerClients::OpenWindow(const n
+@@ -188,19 +272,38 @@ ServiceWorkerClients::OpenWindow(const nsAString& aUrl)
      return nullptr;
    }
  
@@ -166,15 +191,16 @@ diff --git a/dom/workers/ServiceWorkerClients.cpp b/dom/workers/ServiceWorkerCli
 +
 +  aRv = NS_DispatchToMainThread(runnable);
 +  if (NS_WARN_IF(aRv.Failed())) {
-+    promise->MaybeReject(NS_ERROR_NOT_AVAILABLE);
++    promise->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
 +  }
 +
    return promise.forget();
  }
 diff --git a/dom/workers/ServiceWorkerClients.h b/dom/workers/ServiceWorkerClients.h
+index a2f61d4..7fdf25d 100644
 --- a/dom/workers/ServiceWorkerClients.h
 +++ b/dom/workers/ServiceWorkerClients.h
-@@ -30,17 +30,17 @@ public:
+@@ -31,17 +31,17 @@ public:
  
    already_AddRefed<Promise>
    MatchAll(const ClientQueryOptions& aOptions, ErrorResult& aRv);
@@ -194,9 +220,10 @@ diff --git a/dom/workers/ServiceWorkerClients.h b/dom/workers/ServiceWorkerClien
    {
      return mWorkerScope;
 diff --git a/dom/workers/ServiceWorkerContainer.cpp b/dom/workers/ServiceWorkerContainer.cpp
+index df6da24..bfda99d 100644
 --- a/dom/workers/ServiceWorkerContainer.cpp
 +++ b/dom/workers/ServiceWorkerContainer.cpp
-@@ -45,16 +45,23 @@ ServiceWorkerContainer::~ServiceWorkerCo
+@@ -45,16 +45,23 @@ ServiceWorkerContainer::~ServiceWorkerContainer()
  void
  ServiceWorkerContainer::DisconnectFromOwner()
  {
@@ -221,6 +248,7 @@ diff --git a/dom/workers/ServiceWorkerContainer.cpp b/dom/workers/ServiceWorkerC
      if (!swm) {
        // If the browser is shutting down, we don't need to remove the promise.
 diff --git a/dom/workers/ServiceWorkerContainer.h b/dom/workers/ServiceWorkerContainer.h
+index 169363b..56a8218 100644
 --- a/dom/workers/ServiceWorkerContainer.h
 +++ b/dom/workers/ServiceWorkerContainer.h
 @@ -58,24 +58,28 @@ public:
@@ -255,22 +283,52 @@ diff --git a/dom/workers/ServiceWorkerContainer.h b/dom/workers/ServiceWorkerCon
  } // namespace mozilla
  
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+index 5e50d39..14a3d1a 100644
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -2166,36 +2166,51 @@ ServiceWorkerManager::MaybeStartControll
-     GetServiceWorkerRegistrationInfo(aDoc);
-   if (registration) {
-     MOZ_ASSERT(!mControlledDocuments.Contains(aDoc));
-     registration->StartControllingADocument();
-     // Use the already_AddRefed<> form of Put to avoid the addref-deref since
-     // we don't need the registration pointer in this function anymore.
-     mControlledDocuments.Put(aDoc, registration.forget());
+@@ -1966,16 +1966,17 @@ ServiceWorkerManager::CreateServiceWorkerForWindow(nsPIDOMWindow* aWindow,
+                                            WorkerPrivate::OverrideLoadGroup,
+                                            &loadInfo);
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     return rv;
    }
+ 
+   MOZ_ASSERT(!aInfo->CacheName().IsEmpty());
+   loadInfo.mServiceWorkerCacheName = aInfo->CacheName();
++  loadInfo.mServiceWorkerID = aInfo->ID();
+ 
+   RuntimeService* rs = RuntimeService::GetOrCreateService();
+   if (!rs) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   nsRefPtr<SharedWorker> sharedWorker;
+   rv = rs->CreateSharedWorkerForServiceWorkerFromLoadInfo(cx, &loadInfo,
+@@ -2159,45 +2160,69 @@ ServiceWorkerManager::RemoveScope(nsTArray<nsCString>& aList, const nsACString&
+ {
+   aList.RemoveElement(aScope);
+ }
+ 
+ void
+ ServiceWorkerManager::MaybeStartControlling(nsIDocument* aDoc)
+ {
+   AssertIsOnMainThread();
 +
 +  // We keep a set of documents that service workers may choose to start
 +  // controlling using claim().
 +  MOZ_ASSERT(!mAllDocuments.Contains(aDoc));
 +  mAllDocuments.PutEntry(aDoc);
++
+   nsRefPtr<ServiceWorkerRegistrationInfo> registration =
+     GetServiceWorkerRegistrationInfo(aDoc);
+   if (registration) {
+     MOZ_ASSERT(!mControlledDocuments.Contains(aDoc));
+-    registration->StartControllingADocument();
+-    // Use the already_AddRefed<> form of Put to avoid the addref-deref since
+-    // we don't need the registration pointer in this function anymore.
+-    mControlledDocuments.Put(aDoc, registration.forget());
++    StartControllingADocument(registration, aDoc);
+   }
  }
  
  void
@@ -300,6 +358,17 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +}
 +
 +void
++ServiceWorkerManager::StartControllingADocument(ServiceWorkerRegistrationInfo* aRegistration,
++                                                nsIDocument* aDoc)
++{
++  MOZ_ASSERT(aRegistration);
++  MOZ_ASSERT(aDoc);
++
++  aRegistration->StartControllingADocument();
++  mControlledDocuments.Put(aDoc, aRegistration);
++}
++
++void
 +ServiceWorkerManager::StopControllingADocument(ServiceWorkerRegistrationInfo* aRegistration)
 +{
 +  aRegistration->StopControllingADocument();
@@ -317,7 +386,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerManager::GetScopeForUrl(const nsAString& aUrl, nsAString& aScope)
  {
    nsCOMPtr<nsIURI> uri;
-@@ -2740,16 +2755,17 @@ ServiceWorkerManager::CreateServiceWorke
+@@ -2742,16 +2767,17 @@ ServiceWorkerManager::CreateServiceWorker(nsIPrincipal* aPrincipal,
                            nullptr, nullptr);
    if (NS_WARN_IF(NS_FAILED(rv))) {
      return rv;
@@ -335,7 +404,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
    info.mPrincipal = aPrincipal;
  
-@@ -2885,16 +2901,40 @@ EnumControlledDocuments(nsISupports* aKe
+@@ -2887,52 +2913,74 @@ EnumControlledDocuments(nsISupports* aKey,
    }
  
    ServiceWorkerClientInfo clientInfo(document);
@@ -344,66 +413,68 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
    return PL_DHASH_NEXT;
  }
  
+-static PLDHashOperator
+-FireControllerChangeOnMatchingDocument(nsISupports* aKey,
+-                                       ServiceWorkerRegistrationInfo* aValue,
+-                                       void* aData)
 +static void
 +FireControllerChangeOnDocument(nsIDocument* aDocument)
-+{
-+  nsCOMPtr<nsPIDOMWindow> w = aDocument->GetWindow();
-+  MOZ_ASSERT(w);
-+  auto* window = static_cast<nsGlobalWindow*>(w.get());
-+  if (NS_WARN_IF(!window)) {
-+    NS_WARNING("No valid nsGlobalWindow");
-+    return;
-+  }
-+
-+  ErrorResult result;
-+  dom::Navigator* navigator = window->GetNavigator(result);
-+  if (NS_WARN_IF(result.Failed())) {
-+    return;
-+  }
-+
-+  nsRefPtr<ServiceWorkerContainer> container = navigator->ServiceWorker();
-+  container->ControllerChanged(result);
-+  if (result.Failed()) {
-+    NS_WARNING("Failed to dispatch controllerchange event");
-+  }
-+}
-+
- static PLDHashOperator
- FireControllerChangeOnMatchingDocument(nsISupports* aKey,
-                                        ServiceWorkerRegistrationInfo* aValue,
-                                        void* aData)
  {
    AssertIsOnMainThread();
++  MOZ_ASSERT(aDocument);
  
-   ServiceWorkerRegistrationInfo* contextReg = static_cast<ServiceWorkerRegistrationInfo*>(aData);
-@@ -2902,35 +2942,30 @@ FireControllerChangeOnMatchingDocument(n
-     return PL_DHASH_NEXT;
-   }
- 
-   nsCOMPtr<nsIDocument> doc = do_QueryInterface(aKey);
-   if (NS_WARN_IF(!doc)) {
-     return PL_DHASH_NEXT;
-   }
- 
+-  ServiceWorkerRegistrationInfo* contextReg = static_cast<ServiceWorkerRegistrationInfo*>(aData);
+-  if (aValue != contextReg) {
+-    return PL_DHASH_NEXT;
+-  }
+-
+-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(aKey);
+-  if (NS_WARN_IF(!doc)) {
+-    return PL_DHASH_NEXT;
+-  }
+-
 -  nsCOMPtr<nsPIDOMWindow> w = doc->GetWindow();
--  MOZ_ASSERT(w);
--  auto* window = static_cast<nsGlobalWindow*>(w.get());
--  if (NS_WARN_IF(!window)) {
--    NS_WARNING("No valid nsGlobalWindow");
++  nsCOMPtr<nsPIDOMWindow> w = aDocument->GetWindow();
+   MOZ_ASSERT(w);
+   auto* window = static_cast<nsGlobalWindow*>(w.get());
+   if (NS_WARN_IF(!window)) {
+     NS_WARNING("No valid nsGlobalWindow");
 -    return PL_DHASH_NEXT;
--  }
--
--  ErrorResult result;
--  dom::Navigator* navigator = window->GetNavigator(result);
--  if (NS_WARN_IF(result.Failed())) {
++    return;
+   }
+ 
+   ErrorResult result;
+   dom::Navigator* navigator = window->GetNavigator(result);
+   if (NS_WARN_IF(result.Failed())) {
 -    return PL_DHASH_NEXT;
--  }
--
--  nsRefPtr<ServiceWorkerContainer> container = navigator->ServiceWorker();
++    return;
+   }
+ 
+   nsRefPtr<ServiceWorkerContainer> container = navigator->ServiceWorker();
 -  result = container->DispatchTrustedEvent(NS_LITERAL_STRING("controllerchange"));
--  if (result.Failed()) {
--    NS_WARNING("Failed to dispatch controllerchange event");
--  }
++  container->ControllerChanged(result);
+   if (result.Failed()) {
+     NS_WARNING("Failed to dispatch controllerchange event");
+   }
++}
++
++static PLDHashOperator
++FireControllerChangeOnMatchingDocument(nsISupports* aKey,
++                                       ServiceWorkerRegistrationInfo* aValue,
++                                       void* aData)
++{
++  AssertIsOnMainThread();
++
++  ServiceWorkerRegistrationInfo* contextReg = static_cast<ServiceWorkerRegistrationInfo*>(aData);
++  if (aValue != contextReg) {
++    return PL_DHASH_NEXT;
++  }
++
++  nsCOMPtr<nsIDocument> doc = do_QueryInterface(aKey);
++  if (NS_WARN_IF(!doc)) {
++    return PL_DHASH_NEXT;
++  }
++
 +  FireControllerChangeOnDocument(doc);
 +
 +  return PL_DHASH_NEXT;
@@ -426,7 +497,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  void
  ServiceWorkerManager::GetAllClients(const nsCString& aScope,
                                      nsTArray<ServiceWorkerClientInfo>& aControlledDocuments)
-@@ -2943,16 +2978,90 @@ ServiceWorkerManager::GetAllClients(cons
+@@ -2945,16 +2993,66 @@ ServiceWorkerManager::GetAllClients(const nsCString& aScope,
    }
  
    FilterRegistrationData data(aControlledDocuments, registration);
@@ -442,19 +513,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +  MOZ_ASSERT(aWorkerRegistration->mActiveWorker);
 +
 +  // Same origin check
-+  nsIURI* documentURI = aDocument->GetDocumentURI();
-+  nsCOMPtr<nsIURI> scriptURI;
-+  nsCString scriptSpec = aWorkerRegistration->mActiveWorker->ScriptSpec();
-+  nsresult rv = NS_NewURI(getter_AddRefs(scriptURI), scriptSpec,
-+                          nullptr, nullptr);
-+  if (NS_WARN_IF(NS_FAILED(rv))) {
-+    return;
-+  }
-+
-+  nsCOMPtr<nsIScriptSecurityManager> securityManager =
-+    nsContentUtils::GetSecurityManager();
-+  rv = securityManager->CheckSameOriginURI(documentURI, scriptURI, false);
-+  if (NS_FAILED(rv)) {
++  if (!aWorkerRegistration->mPrincipal->Equals(aDocument->NodePrincipal())) {
 +    return;
 +  }
 +
@@ -464,8 +523,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +
 +  // The registration currently controlling the client
 +  nsRefPtr<ServiceWorkerRegistrationInfo> controllingRegistration;
-+  rv = GetDocumentRegistration(aDocument,
-+                               getter_AddRefs(controllingRegistration));
++  GetDocumentRegistration(aDocument, getter_AddRefs(controllingRegistration));
 +
 +  if (aWorkerRegistration != matchingRegistration ||
 +        aWorkerRegistration == controllingRegistration) {
@@ -476,29 +534,18 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +    StopControllingADocument(controllingRegistration);
 +  }
 +
-+  mControlledDocuments.Put(aDocument, aWorkerRegistration);
-+  aWorkerRegistration->StartControllingADocument();
-+
++  StartControllingADocument(aWorkerRegistration, aDocument);
 +  FireControllerChangeOnDocument(aDocument);
 +}
 +
 +nsresult
-+ServiceWorkerManager::ClaimClients(const nsCString& aScope,
-+                                   WorkerPrivate* aWorkerPrivate)
++ServiceWorkerManager::ClaimClients(const nsCString& aScope, uint64_t aId)
 +{
 +  nsRefPtr<ServiceWorkerRegistrationInfo> registration =
 +    GetRegistration(aScope);
 +
-+  if (!registration) {
-+    // XXXcatalinb: This can happen if the registration is unregistered while
-+    // the claim runnable is waiting in queue. We reject the claim promise
-+    // with NS_ERROR_FAILURE.
-+    NS_WARNING("Claim request doesn't have a valid registration.");
-+    return NS_ERROR_FAILURE;
-+  }
-+
-+  if (!registration->mActiveWorker ||
-+      !(registration->mActiveWorker->ID() == aWorkerPrivate->ServiceWorkerID())) {
++  if (!registration || !registration->mActiveWorker ||
++      !(registration->mActiveWorker->ID() == aId)) {
 +    // The worker is not active.
 +    return NS_ERROR_DOM_INVALID_STATE_ERR;
 +  }
@@ -517,7 +564,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerRegistrationInfo*
  ServiceWorkerManager::CreateNewRegistration(const nsCString& aScope,
                                              nsIPrincipal* aPrincipal)
-@@ -3204,9 +3313,18 @@ ServiceWorkerInfo::UpdateState(ServiceWo
+@@ -3206,9 +3304,18 @@ ServiceWorkerInfo::UpdateState(ServiceWorkerState aState)
    // Activated can only go to redundant.
    MOZ_ASSERT_IF(mState == ServiceWorkerState::Activated, aState == ServiceWorkerState::Redundant);
  #endif
@@ -537,9 +584,10 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +
  END_WORKERS_NAMESPACE
 diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManager.h
+index de09b37..b2ce5b8 100644
 --- a/dom/workers/ServiceWorkerManager.h
 +++ b/dom/workers/ServiceWorkerManager.h
-@@ -210,25 +210,35 @@ public:
+@@ -212,25 +212,35 @@ public:
   */
  class ServiceWorkerInfo final
  {
@@ -575,7 +623,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    {
      return mScriptSpec;
    }
-@@ -247,16 +257,17 @@ public:
+@@ -249,16 +259,17 @@ public:
  
    explicit ServiceWorkerInfo(ServiceWorkerRegistrationInfo* aReg,
                               const nsACString& aScriptSpec,
@@ -593,7 +641,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    ServiceWorkerState
    State() const
    {
-@@ -264,16 +275,22 @@ public:
+@@ -266,16 +277,22 @@ public:
    }
  
    const nsString&
@@ -616,7 +664,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    SetActivateStateUncheckedWithoutEvent(ServiceWorkerState aState)
    {
      mState = aState;
-@@ -337,16 +354,19 @@ public:
+@@ -339,16 +356,19 @@ public:
    // Scope to registration. 
    // The scope should be a fully qualified valid URL.
    nsRefPtrHashtable<nsCStringHashKey, ServiceWorkerRegistrationInfo> mServiceWorkerRegistrationInfos;
@@ -636,7 +684,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    already_AddRefed<ServiceWorkerRegistrationInfo>
    GetRegistration(const nsCString& aScope) const
    {
-@@ -385,16 +405,23 @@ public:
+@@ -387,16 +407,23 @@ public:
                uint32_t aLineNumber,
                uint32_t aColumnNumber,
                uint32_t aFlags);
@@ -650,7 +698,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
 +                   ServiceWorkerRegistrationInfo* aWorkerRegistration);
 +
 +  nsresult
-+  ClaimClients(const nsCString& aScope, WorkerPrivate* aWorkerPrivate);
++  ClaimClients(const nsCString& aScope, uint64_t aId);
 +
    static already_AddRefed<ServiceWorkerManager>
    GetInstance();
@@ -660,7 +708,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
  
    NS_IMETHOD
    AddRegistrationEventListener(const nsAString& aScope,
-@@ -434,16 +461,19 @@ private:
+@@ -436,16 +463,23 @@ private:
  
    already_AddRefed<ServiceWorker>
    CreateServiceWorkerForScope(const nsACString& aScope);
@@ -669,6 +717,10 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    InvalidateServiceWorkerRegistrationWorker(ServiceWorkerRegistrationInfo* aRegistration,
                                              WhichServiceWorker aWhichOnes);
  
++  void
++  StartControllingADocument(ServiceWorkerRegistrationInfo* aRegistration,
++                            nsIDocument* aDoc);
++
 +  void
 +  StopControllingADocument(ServiceWorkerRegistrationInfo* aRegistration);
 +
@@ -681,6 +733,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    already_AddRefed<ServiceWorkerRegistrationInfo>
    GetServiceWorkerRegistrationInfo(nsIURI* aURI);
 diff --git a/dom/workers/WorkerPrivate.cpp b/dom/workers/WorkerPrivate.cpp
+index 697c7ca..f954ead 100644
 --- a/dom/workers/WorkerPrivate.cpp
 +++ b/dom/workers/WorkerPrivate.cpp
 @@ -2241,16 +2241,17 @@ PRThreadFromThread(nsIThread* aThread)
@@ -701,7 +754,7 @@ diff --git a/dom/workers/WorkerPrivate.cpp b/dom/workers/WorkerPrivate.cpp
    , mIsInPrivilegedApp(false)
    , mIsInCertifiedApp(false)
    , mIndexedDBAllowed(false)
-@@ -2294,16 +2295,17 @@ WorkerLoadInfo::StealFrom(WorkerLoadInfo
+@@ -2294,16 +2295,17 @@ WorkerLoadInfo::StealFrom(WorkerLoadInfo& aOther)
    aOther.mInterfaceRequestor.swap(mInterfaceRequestor);
  
    MOZ_ASSERT(!mPrincipalInfo);
@@ -720,9 +773,10 @@ diff --git a/dom/workers/WorkerPrivate.cpp b/dom/workers/WorkerPrivate.cpp
    mIsInCertifiedApp = aOther.mIsInCertifiedApp;
    mIndexedDBAllowed = aOther.mIndexedDBAllowed;
 diff --git a/dom/workers/WorkerPrivate.h b/dom/workers/WorkerPrivate.h
+index 59c5093..8d89b2d 100644
 --- a/dom/workers/WorkerPrivate.h
 +++ b/dom/workers/WorkerPrivate.h
-@@ -462,16 +462,22 @@ public:
+@@ -463,16 +463,22 @@ public:
    }
  
    uint64_t
@@ -746,9 +800,10 @@ diff --git a/dom/workers/WorkerPrivate.h b/dom/workers/WorkerPrivate.h
  
    void
 diff --git a/dom/workers/Workers.h b/dom/workers/Workers.h
+index b1b1147..19029ec 100644
 --- a/dom/workers/Workers.h
 +++ b/dom/workers/Workers.h
-@@ -241,16 +241,17 @@ struct WorkerLoadInfo
+@@ -242,16 +242,17 @@ struct WorkerLoadInfo
    nsAutoPtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
    nsCString mDomain;
  
@@ -768,6 +823,7 @@ diff --git a/dom/workers/Workers.h b/dom/workers/Workers.h
    bool mIsInCertifiedApp;
 diff --git a/dom/workers/test/serviceworkers/claim_clients/client.html b/dom/workers/test/serviceworkers/claim_clients/client.html
 new file mode 100644
+index 0000000..eecfb29
 --- /dev/null
 +++ b/dom/workers/test/serviceworkers/claim_clients/client.html
 @@ -0,0 +1,44 @@
@@ -817,32 +873,23 @@ new file mode 100644
 +
 diff --git a/dom/workers/test/serviceworkers/claim_oninstall_worker.js b/dom/workers/test/serviceworkers/claim_oninstall_worker.js
 new file mode 100644
+index 0000000..269afa7
 --- /dev/null
 +++ b/dom/workers/test/serviceworkers/claim_oninstall_worker.js
-@@ -0,0 +1,18 @@
-+var resolvePromise;
-+
+@@ -0,0 +1,7 @@
 +oninstall = function(e) {
-+  var lockState = new Promise(function(res, rej) {
-+    resolvePromise = res;
++  var claimFailedPromise = new Promise(function(resolve, reject) {
++    clients.claim().then(reject, () => resolve());
 +  });
 +
-+  e.waitUntil(lockState);
-+}
-+
-+onmessage = function(messageEvent) {
-+  self.clients.claim().then(function(res) {
-+    // claim should always throw.
-+    messageEvent.source.postMessage(false);
-+  }).catch(function(e) {
-+    messageEvent.source.postMessage(true);
-+  }).then(resolvePromise);
++  e.waitUntil(claimFailedPromise);
 +}
 diff --git a/dom/workers/test/serviceworkers/claim_worker_1.js b/dom/workers/test/serviceworkers/claim_worker_1.js
 new file mode 100644
+index 0000000..e5f6392
 --- /dev/null
 +++ b/dom/workers/test/serviceworkers/claim_worker_1.js
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,28 @@
 +onactivate = function(e) {
 +  var result = {
 +    resolve_value: false,
@@ -861,19 +908,19 @@ new file mode 100644
 +
 +    return claimPromise.then(self.clients.matchAll().then(function(matched) {
 +      // should be 2
-+      final_matched_count = matched.length;
-+      if (final_matched_count === 2) {
-+        for (i = 0; i < matched.length; i++) {
-+          matched[i].postMessage(result);
-+        }
-+      } else {
-+        dump("ERROR: claim_worker_1 failed to capture clients. count=" + final_matched_count + "\n");
++      result.match_count_after = matched.length;
++      for (i = 0; i < matched.length; i++) {
++        matched[i].postMessage(result);
++      }
++      if (result.match_count_after !== 2) {
++        dump("ERROR: claim_worker_1 failed to capture clients.\n");
 +      }
 +    }));
 +  });
 +}
 diff --git a/dom/workers/test/serviceworkers/claim_worker_2.js b/dom/workers/test/serviceworkers/claim_worker_2.js
 new file mode 100644
+index 0000000..be8281d
 --- /dev/null
 +++ b/dom/workers/test/serviceworkers/claim_worker_2.js
 @@ -0,0 +1,27 @@
@@ -895,59 +942,57 @@ new file mode 100644
 +
 +    return claimPromise.then(self.clients.matchAll().then(function(matched) {
 +      // should be 1
-+      final_matched_count = matched.length;
-+      if (final_matched_count === 1) {
++      result.match_count_after = matched.length;
++      if (result.match_count_after === 1) {
 +        matched[0].postMessage(result);
 +      } else {
-+        dump("ERROR: claim_worker_2 failed to capture clients. count=" + final_matched_count + "\n");
++        dump("ERROR: claim_worker_2 failed to capture clients.\n");
 +      }
 +    }));
 +  });
 +}
 diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
+index dda12fe..2f837b0 100644
 --- a/dom/workers/test/serviceworkers/mochitest.ini
 +++ b/dom/workers/test/serviceworkers/mochitest.ini
-@@ -61,16 +61,20 @@ support-files =
-   match_all_client/match_all_client_id.html
-   match_all_client_id_worker.js
-   source_message_posting_worker.js
-   scope/scope_worker.js
-   redirect_serviceworker.sjs
-   importscript.sjs
-   importscript_worker.js
-   client_focus_worker.js
-+  claim_oninstall_worker.js
-+  claim_worker_1.js
-+  claim_worker_2.js
-+  claim_clients/client.html
-   bug1151916_worker.js
-   bug1151916_driver.html
+@@ -71,16 +71,20 @@ support-files =
    worker_updatefoundevent.js
    worker_updatefoundevent2.js
    updatefoundevent.html
    empty.js
    periodic.sjs
    periodic/frame.html
-@@ -98,12 +102,14 @@ support-files =
- [test_close.html]
- [test_serviceworker_interfaces.html]
- [test_serviceworker_not_sharedworker.html]
- [test_match_all_client_id.html]
+   periodic/register.html
+   periodic/unregister.html
++  claim_oninstall_worker.js
++  claim_worker_1.js
++  claim_worker_2.js
++  claim_clients/client.html
+ 
+ [test_unregister.html]
+ [test_installation_simple.html]
+ [test_fetch_event.html]
+ [test_https_fetch.html]
+ [test_https_fetch_cloned_response.html]
+ [test_https_synth_fetch_from_cached_sw.html]
+ [test_match_all.html]
+@@ -102,8 +106,10 @@ support-files =
  [test_sandbox_intercept.html]
  [test_request_context.html]
  [test_importscript.html]
  [test_client_focus.html]
-+[test_claim_oninstall.html]
-+[test_claim.html]
  [test_bug1151916.html]
  [test_workerupdatefoundevent.html]
  [test_empty_serviceworker.html]
  [test_periodic_update.html]
++[test_claim_oninstall.html]
++[test_claim.html]
 diff --git a/dom/workers/test/serviceworkers/test_claim.html b/dom/workers/test/serviceworkers/test_claim.html
 new file mode 100644
+index 0000000..d701585
 --- /dev/null
 +++ b/dom/workers/test/serviceworkers/test_claim.html
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,172 @@
 +<!--
 +  Any copyright is dedicated to the Public Domain.
 +  http://creativecommons.org/publicdomain/zero/1.0/
@@ -998,11 +1043,9 @@ new file mode 100644
 +    content = document.getElementById("content");
 +    ok(content, "parent exists.");
 +
-+    var iframe = document.createElement("iframe");
-+    iframe.setAttribute('src', "claim_clients/client.html");
-+    content.appendChild(iframe);
-+
-+    client = iframe;
++    client = document.createElement("iframe");
++    client.setAttribute('src', "claim_clients/client.html");
++    content.appendChild(client);
 +
 +    return p;
 +  }
@@ -1012,22 +1055,7 @@ new file mode 100644
 +        "Controlling service worker has the correct url.");
 +  }
 +
-+  function testClaimFirstWorker() {
-+    // wait for the worker to control us
-+    var controllerChange = new Promise(function(res, rej) {
-+      navigator.serviceWorker.oncontrollerchange = function(e) {
-+        ok(true, "controller changed event received.");
-+        res();
-+      };
-+    });
-+
-+    var messageFromWorker = new Promise(function(res, rej) {
-+      navigator.serviceWorker.onmessage = function(e) {
-+        ok(e.data.message === "claim_worker_1", "Received message from claiming worker.");
-+        res();
-+      }
-+    });
-+
++  function testClientWasClaimed(expected) {
 +    var resolveClientMessage, resolveClientControllerChange;
 +    var messageFromClient = new Promise(function(res, rej) {
 +      resolveClientMessage = res;
@@ -1047,47 +1075,70 @@ new file mode 100644
 +      }
 +
 +      if (e.data.event === "message") {
-+        ok(e.data.data.message === "claim_worker_1",
++        ok(e.data.data.resolve_value === undefined,
++            "Claim should resolve with undefined.");
++        ok(e.data.data.message === expected.message,
 +           "Client received message from claiming worker.");
++        ok(e.data.data.match_count_before === expected.match_count_before,
++            "MatchAll clients count before claim should be " + expected.match_count_before);
++        ok(e.data.data.match_count_after === expected.match_count_after,
++            "MatchAll clients count after claim should be " + expected.match_count_after);
 +        resolveClientMessage();
 +      }
 +    }
 +
-+    return Promise.all([controllerChange, messageFromWorker, messageFromClient,
-+                        controllerChangeFromClient]).then(testController);
++    return Promise.all([messageFromClient, controllerChangeFromClient])
++      .then(() => window.onmessage = null);
++  }
++
++  function testClaimFirstWorker() {
++    // wait for the worker to control us
++    var controllerChange = new Promise(function(res, rej) {
++      navigator.serviceWorker.oncontrollerchange = function(e) {
++        ok(true, "controller changed event received.");
++        res();
++      };
++    });
++
++    var messageFromWorker = new Promise(function(res, rej) {
++      navigator.serviceWorker.onmessage = function(e) {
++        ok(e.data.resolve_value === undefined,
++            "Claim should resolve with undefined.");
++        ok(e.data.message === "claim_worker_1",
++            "Received message from claiming worker.");
++        ok(e.data.match_count_before === 0,
++            "Worker doesn't control any client before claim.");
++        ok(e.data.match_count_after === 2, "Worker should claim 2 clients.");
++        res();
++      }
++    });
++
++    var clientClaim = testClientWasClaimed({
++      message: "claim_worker_1",
++      match_count_before: 0,
++      match_count_after: 2
++    });
++
++    return Promise.all([controllerChange, messageFromWorker, clientClaim])
++      .then(testController);
 +  }
 +
 +  function testClaimSecondWorker() {
 +    navigator.serviceWorker.oncontrollerchange = function(e) {
 +      ok(false, "Claim_worker_2 shouldn't claim this window.");
 +    }
-+    var resolveClientMessage, resolveClientControllerChange;
-+    var messageFromClient = new Promise(function(res, rej) {
-+      resolveClientMessage = res;
-+    });
-+    var controllerChangeFromClient = new Promise(function(res, rej) {
-+      resolveClientControllerChange = res;
-+    });
-+    window.onmessage = function(e) {
-+      if (!e.data.event) {
-+        ok(false, "Unknown message received: " + e.data);
-+      }
 +
-+      if (e.data.event === "controllerchange") {
-+        ok(e.data.controller,
-+           "Client was claimed by the second worker and received controllerchange event");
-+        resolveClientControllerChange();
-+      }
-+
-+      if (e.data.event === "message") {
-+        ok(e.data.data.message === "claim_worker_2",
-+           "Client received message from the second worker.");
-+        resolveClientMessage();
-+      }
++    navigator.serviceWorker.onmessage = function(e) {
++      ok(false, "Claim_worker_2 shouldn't claim this window.");
 +    }
 +
-+    return Promise.all([messageFromClient, controllerChangeFromClient])
-+      .then(testController);
++    var clientClaim = testClientWasClaimed({
++      message: "claim_worker_2",
++      match_count_before: 0,
++      match_count_after: 1
++    });
++
++    return clientClaim.then(testController);
 +  }
 +
 +  function runTest() {
@@ -1116,9 +1167,10 @@ new file mode 100644
 +
 diff --git a/dom/workers/test/serviceworkers/test_claim_oninstall.html b/dom/workers/test/serviceworkers/test_claim_oninstall.html
 new file mode 100644
+index 0000000..5844614
 --- /dev/null
 +++ b/dom/workers/test/serviceworkers/test_claim_oninstall.html
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,73 @@
 +<!--
 +  Any copyright is dedicated to the Public Domain.
 +  http://creativecommons.org/publicdomain/zero/1.0/
@@ -1146,22 +1198,25 @@ new file mode 100644
 +
 +  function unregister() {
 +    return registration.unregister().then(function(result) {
-+      info("got:" + result);
 +      ok(result, "Unregister should return true.");
 +    });
 +  }
 +
 +  function testClaim() {
 +    ok(registration.installing, "Worker should be in installing state");
-+    registration.installing.postMessage("go");
++
 +    navigator.serviceWorker.oncontrollerchange = function() {
 +      ok(false, "Claim should not succeed when the worker is not active.");
 +    }
 +
 +    var p = new Promise(function(res, rej) {
-+      navigator.serviceWorker.onmessage = function(e) {
-+        ok(e.data, "Claim should reject if the worker is not active");
++      registration.installing.onstatechange = function(e) {
++        // The worker will become active only if claim will reject inside the
++        // install handler.
++
++        ok(registration.active, "Claim should reject if the worker is not active");
 +        ok(navigator.serviceWorker.controller === null, "Client is not controlled.");
++        e.target.onstatechange = null;
 +        res();
 +      }
 +    });
