@@ -1,13 +1,13 @@
 # HG changeset patch
-# Parent df34731ae8a15fc032ca880840f024ed44c1f7af
+# Parent d8420a541d1c1a00f0e4b60a7c55f4c0b928edd9
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm,miker
 
 diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
 --- a/browser/app/profile/firefox.js
 +++ b/browser/app/profile/firefox.js
-@@ -1443,16 +1443,19 @@ pref("devtools.performance.ui.enable-fra
- pref("devtools.performance.ui.show-jit-optimizations", false);
+@@ -1457,16 +1457,19 @@ pref("devtools.performance.ui.show-jit-o
+ #endif
  
  // The default cache UI setting
  pref("devtools.cache.disabled", false);
@@ -29,15 +29,15 @@ diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
 diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/framework/test/browser.ini
 --- a/browser/devtools/framework/test/browser.ini
 +++ b/browser/devtools/framework/test/browser.ini
-@@ -4,18 +4,18 @@ subsuite = devtools
- support-files =
-   browser_toolbox_options_disable_js.html
+@@ -6,18 +6,18 @@ support-files =
    browser_toolbox_options_disable_js_iframe.html
    browser_toolbox_options_disable_cache.sjs
    browser_toolbox_sidebar_tool.xul
+   code_math.js
    head.js
    helper_disable_cache.js
    doc_theme.css
+   doc_viewsource.html
 -  browser_toolbox_options_enable_serviceworkers_testing.html
 -  serviceworker.js
 +  browser_toolbox_options_serviceworkers.html
@@ -50,8 +50,8 @@ diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/fram
  [browser_new_activation_workflow.js]
  [browser_target_events.js]
  [browser_target_remote.js]
-@@ -49,14 +49,14 @@ skip-if = e10s # Bug 1069044 - destroyIn
- [browser_toolbox_transport_events.js]
+@@ -57,14 +57,14 @@ skip-if = e10s # Bug 1069044 - destroyIn
+ [browser_toolbox_view_source_04.js]
  [browser_toolbox_window_reload_target.js]
  [browser_toolbox_window_shortcuts.js]
  skip-if = os == "mac" && os_version == "10.8" || os == "win" && os_version == "5.1" # Bug 851129 - Re-enable browser_toolbox_window_shortcuts.js test after leaks are fixed
@@ -61,7 +61,7 @@ diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/fram
  [browser_toolbox_theme_registration.js]
 -[browser_toolbox_options_enable_serviceworkers_testing.js]
 +[browser_toolbox_options_serviceworkers.js]
- skip-if = e10s # Bug 1030318
+ skip-if = true # Bug 1153407 - this test breaks subsequent tests and is not e10s compatible
  
  # We want this test to run for mochitest-dt as well, so we include it here:
  [../../../base/content/test/general/browser_parsable_css.js]
@@ -351,25 +351,25 @@ diff --git a/browser/devtools/framework/toolbox-options.xul b/browser/devtools/f
 diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/toolbox.js
 --- a/browser/devtools/framework/toolbox.js
 +++ b/browser/devtools/framework/toolbox.js
-@@ -329,16 +329,17 @@ Toolbox.prototype = {
-         let framesMenu = this.doc.getElementById("command-button-frames");
-         framesMenu.addEventListener("command", this.selectFrame, true);
+@@ -347,16 +347,17 @@ Toolbox.prototype = {
+       this.textboxContextMenuPopup.addEventListener("popupshowing",
+         this._updateTextboxMenuItems, true);
  
-         this._buildDockButtons();
-         this._buildOptions();
-         this._buildTabs();
-         this._applyCacheSettings();
-         this._applyServiceWorkersTestingSettings();
-+        this._applyServiceWorkersForceUpdateOnRegistrationFlag();
-         this._addKeysToWindow();
-         this._addReloadKeys();
-         this._addHostListeners();
-         if (this._hostOptions && this._hostOptions.zoom === false) {
-           this._disableZoomKeys();
-         } else {
-           this._addZoomKeys();
-           this._loadInitialZoom();
-@@ -411,16 +412,19 @@ Toolbox.prototype = {
+       this._buildDockButtons();
+       this._buildOptions();
+       this._buildTabs();
+       this._applyCacheSettings();
+       this._applyServiceWorkersTestingSettings();
++      this._applyServiceWorkersForceUpdateOnRegistrationFlag();
+       this._addKeysToWindow();
+       this._addReloadKeys();
+       this._addHostListeners();
+       if (this._hostOptions && this._hostOptions.zoom === false) {
+         this._disableZoomKeys();
+       } else {
+         this._addZoomKeys();
+         this._loadInitialZoom();
+@@ -426,16 +427,19 @@ Toolbox.prototype = {
    _prefChanged: function(event, data) {
      switch(data.pref) {
      case "devtools.cache.disabled":
@@ -389,7 +389,7 @@ diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/
      key.addEventListener("command", () => {
        this.selectTool("options");
      }, true);
-@@ -766,16 +770,33 @@ Toolbox.prototype = {
+@@ -791,16 +795,33 @@ Toolbox.prototype = {
      if (this.target.activeTab) {
        this.target.activeTab.reconfigure({
          "serviceWorkersTestingEnabled": serviceWorkersTestingEnabled
@@ -423,7 +423,7 @@ diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/
        this._pickerButton.setAttribute("checked", "true");
      } else {
        this._pickerButton.removeAttribute("checked");
-@@ -1717,17 +1738,18 @@ Toolbox.prototype = {
+@@ -1746,17 +1767,18 @@ Toolbox.prototype = {
        }
      }
  
@@ -446,7 +446,7 @@ diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/
 diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
 --- a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
 +++ b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
-@@ -98,16 +98,22 @@
+@@ -101,16 +101,22 @@
  <!ENTITY options.disableCache.tooltip2   "Turning this option on will disable the cache for all tabs that have the toolbox open.">
  
  <!-- LOCALIZATION NOTE (options.enableServiceWorkersHTTP.label,
@@ -472,7 +472,7 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
 diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 --- a/dom/base/nsDOMWindowUtils.cpp
 +++ b/dom/base/nsDOMWindowUtils.cpp
-@@ -4029,16 +4029,42 @@ nsDOMWindowUtils::GetServiceWorkersTesti
+@@ -3748,16 +3748,42 @@ nsDOMWindowUtils::GetServiceWorkersTesti
    nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
    NS_ENSURE_STATE(window);
  
@@ -518,7 +518,7 @@ diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
 --- a/dom/base/nsGlobalWindow.cpp
 +++ b/dom/base/nsGlobalWindow.cpp
-@@ -580,17 +580,18 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWind
+@@ -584,17 +584,18 @@ nsPIDOMWindow::nsPIDOMWindow(nsPIDOMWind
    mMayHavePointerEnterLeaveEventListener(false),
    mIsModalContentWindow(false),
    mIsActive(false), mIsBackground(false),
@@ -541,7 +541,7 @@ diff --git a/dom/base/nsGlobalWindow.cpp b/dom/base/nsGlobalWindow.cpp
 diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
 --- a/dom/base/nsPIDOMWindow.h
 +++ b/dom/base/nsPIDOMWindow.h
-@@ -195,16 +195,28 @@ public:
+@@ -194,16 +194,28 @@ public:
    }
  
    bool GetServiceWorkersTestingEnabled()
@@ -570,7 +570,7 @@ diff --git a/dom/base/nsPIDOMWindow.h b/dom/base/nsPIDOMWindow.h
    float GetAudioGlobalVolumeInternal(float aVolume);
    void RefreshMediaElements();
  
-@@ -824,16 +836,20 @@ protected:
+@@ -823,16 +835,20 @@ protected:
    // the (chrome|content)-document-global-created notification.
    bool mHasNotifiedGlobalCreated;
  
@@ -603,7 +603,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
  interface nsIContentPermissionRequest;
  interface nsIObserver;
  
--[scriptable, uuid(7ecfd6e7-120a-4567-85f7-14277f4c6d9f)]
+-[scriptable, uuid(1a75c351-d115-4d51-94df-731dd1723a1f)]
 +[scriptable, uuid(e97634c8-9abf-4a54-ac72-5c09ef130207)]
  interface nsIDOMWindowUtils : nsISupports {
  
@@ -613,7 +613,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
     * to the given value. That is, when set to kDontAnimMode, all images
     * will stop animating. The attribute's value must be one of the
     * animationMode values from imgIContainer.
-@@ -1785,16 +1785,22 @@ interface nsIDOMWindowUtils : nsISupport
+@@ -1802,16 +1802,22 @@ interface nsIDOMWindowUtils : nsISupport
                         in int32_t aRight,
                         in int32_t aBottom,
                         in int32_t aLeft);
@@ -639,7 +639,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -511,16 +511,17 @@ class ServiceWorkerRegisterJob final : p
+@@ -568,16 +568,17 @@ class ServiceWorkerRegisterJob final : p
    friend class ContinueInstallTask;
  
    nsCString mScope;
@@ -657,7 +657,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
    {
      REGISTER_JOB = 0,
      UPDATE_JOB = 1,
-@@ -529,22 +530,24 @@ class ServiceWorkerRegisterJob final : p
+@@ -588,24 +589,26 @@ class ServiceWorkerRegisterJob final : p
  public:
    NS_DECL_ISUPPORTS_INHERITED
  
@@ -674,8 +674,9 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      , mScriptSpec(aScriptSpec)
      , mCallback(aCallback)
      , mPrincipal(aPrincipal)
-+    , mForceUpdate(aForceUpdate)
      , mJobType(REGISTER_JOB)
+     , mCanceled(false)
++    , mForceUpdate(aForceUpdate)    
    { }
  
    // [[Update]]
@@ -683,7 +684,8 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
                             ServiceWorkerRegistrationInfo* aRegistration,
                             ServiceWorkerUpdateFinishCallback* aCallback)
      : ServiceWorkerJob(aQueue)
-@@ -566,17 +569,18 @@ public:
+     , mRegistration(aRegistration)
+@@ -641,17 +644,18 @@ public:
        return;
      }
  
@@ -697,13 +699,13 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +            mScriptSpec.Equals(newest->ScriptSpec()) &&
              mScriptSpec.Equals(mRegistration->mScriptSpec)) {
            mRegistration->mPendingUninstall = false;
+           swm->StoreRegistration(mPrincipal, mRegistration);
            Succeed();
            Done(NS_OK);
            return;
          }
        } else {
-         mRegistration = swm->CreateNewRegistration(mScope, mPrincipal);
-@@ -885,16 +889,18 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -1052,16 +1056,18 @@ ServiceWorkerManager::Register(nsIDOMWin
    // ServiceWorkers.
    MOZ_ASSERT(!nsContentUtils::IsCallerChrome());
  
@@ -722,7 +724,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
    nsCOMPtr<nsIURI> documentURI = doc->GetBaseURI();
  
-@@ -986,17 +992,22 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -1153,17 +1159,22 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    ServiceWorkerJobQueue* queue = GetOrCreateJobQueue(cleanedScope);
    MOZ_ASSERT(queue);
@@ -749,7 +751,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/server/actors/webbrowser.js
 --- a/toolkit/devtools/server/actors/webbrowser.js
 +++ b/toolkit/devtools/server/actors/webbrowser.js
-@@ -1316,16 +1316,23 @@ TabActor.prototype = {
+@@ -1377,16 +1377,23 @@ TabActor.prototype = {
      }
      if ((typeof options.serviceWorkersTestingEnabled !== "undefined") &&
          (options.serviceWorkersTestingEnabled !==
@@ -773,7 +775,7 @@ diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/ser
      if ((hasExplicitReloadFlag && options.performReload) ||
         (!hasExplicitReloadFlag && reload)) {
        this.onReload();
-@@ -1364,16 +1371,31 @@ TabActor.prototype = {
+@@ -1425,16 +1432,31 @@ TabActor.prototype = {
      }
  
      let windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -805,7 +807,7 @@ diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/ser
        return null;
      }
  
-@@ -1404,16 +1426,31 @@ TabActor.prototype = {
+@@ -1465,16 +1487,31 @@ TabActor.prototype = {
      }
  
      let windowUtils = this.window.QueryInterface(Ci.nsIInterfaceRequestor)
