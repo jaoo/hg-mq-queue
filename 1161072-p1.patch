@@ -278,10 +278,10 @@ index 07840b2..b9fc8db 100644
      pref: prefName,
      newValue: newValue
 diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/toolbox.js
-index 2b02ef7..9dcd02d 100644
+index 81547ca..978a351 100644
 --- a/browser/devtools/framework/toolbox.js
 +++ b/browser/devtools/framework/toolbox.js
-@@ -1736,17 +1736,18 @@ Toolbox.prototype = {
+@@ -1743,17 +1743,18 @@ Toolbox.prototype = {
        } catch (e) {
          // We don't want to stop here if any panel fail to close.
          console.error("Panel " + id + ":", e);
@@ -330,10 +330,10 @@ index 33d0467..fa0115e 100644
  XPCOMUtils.defineLazyGetter(StyleEditorPanel.prototype, "strings",
    function () {
 diff --git a/toolkit/devtools/server/actors/webbrowser.js b/toolkit/devtools/server/actors/webbrowser.js
-index 5785c53..1879617 100644
+index 0b5aa03..88ee1ba 100644
 --- a/toolkit/devtools/server/actors/webbrowser.js
 +++ b/toolkit/devtools/server/actors/webbrowser.js
-@@ -1254,16 +1254,17 @@ TabActor.prototype = {
+@@ -1259,16 +1259,17 @@ TabActor.prototype = {
      if (!this.attached) {
        return false;
      }
@@ -351,7 +351,7 @@ index 5785c53..1879617 100644
  
        // Removes the observers being set in _watchDocShells
        if (this.listenForNewDocShells) {
-@@ -1344,17 +1345,22 @@ TabActor.prototype = {
+@@ -1349,17 +1350,22 @@ TabActor.prototype = {
    },
  
    /**
@@ -374,7 +374,7 @@ index 5785c53..1879617 100644
     */
    _toggleDevtoolsSettings: function(options) {
      // Wait a tick so that the response packet can be dispatched before the
-@@ -1384,46 +1390,73 @@ TabActor.prototype = {
+@@ -1389,46 +1395,73 @@ TabActor.prototype = {
      let hasExplicitReloadFlag = "performReload" in options;
      if ((hasExplicitReloadFlag && options.performReload) ||
         (!hasExplicitReloadFlag && reload)) {
@@ -458,7 +458,7 @@ index 5785c53..1879617 100644
    /**
     * Return cache allowed status.
     */
-@@ -1434,28 +1467,16 @@ TabActor.prototype = {
+@@ -1439,28 +1472,16 @@ TabActor.prototype = {
      }
  
      let disable = Ci.nsIRequest.LOAD_BYPASS_CACHE |
