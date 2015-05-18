@@ -1,5 +1,5 @@
 # HG changeset patch
-# Parent 0c28ac8941853bc0cfe05a1bfc182555ca16e3ee
+# Parent 2f6ea66057fe37794d7fc061407495cdcece5443
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
 Bug 1131352 - Add ServiceWorkerGlobalScope skipWaiting(). r=nsm
 
@@ -29,7 +29,7 @@ diff --git a/dom/webidl/ServiceWorkerGlobalScope.webidl b/dom/webidl/ServiceWork
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -857,18 +857,21 @@ private:
+@@ -983,18 +983,21 @@ private:
        }
      }
  
@@ -53,7 +53,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
  NS_IMPL_ISUPPORTS_INHERITED0(ServiceWorkerRegisterJob, ServiceWorkerJob);
  
-@@ -1145,49 +1148,57 @@ LifecycleEventWorkerRunnable::DispatchLi
+@@ -1307,49 +1310,57 @@ LifecycleEventWorkerRunnable::DispatchLi
      new LifecycleEventPromiseHandler(mTask, mServiceWorker, false /* activateImmediately */);
    waitUntilPromise->AppendNativeHandler(handler);
    return true;
@@ -126,7 +126,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
    // FIXME(nsm): Unlink appcache if there is one.
  
    swm->CheckPendingReadyPromises();
-@@ -3051,16 +3062,41 @@ ServiceWorkerManager::ClaimClients(const
+@@ -3216,16 +3227,41 @@ ServiceWorkerManager::ClaimClients(const
      return NS_ERROR_DOM_INVALID_STATE_ERR;
    }
  
@@ -171,7 +171,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManager.h
 --- a/dom/workers/ServiceWorkerManager.h
 +++ b/dom/workers/ServiceWorkerManager.h
-@@ -189,16 +189,19 @@ public:
+@@ -207,16 +207,19 @@ public:
    {
      return mActiveWorker && mControlledDocumentsCounter > 0;
    }
@@ -191,7 +191,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    void
    FinishActivate(bool aSuccess);
  
-@@ -222,16 +225,17 @@ private:
+@@ -240,16 +243,17 @@ private:
    // workers to their corresponding serviceWorkerInfo.
    uint64_t mServiceWorkerID;
  
@@ -209,7 +209,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    // invalid.
    uint64_t
    GetNextID() const;
-@@ -252,24 +256,37 @@ public:
+@@ -270,24 +274,37 @@ public:
    }
  
    void SetScriptSpec(const nsCString& aSpec)
@@ -250,7 +250,7 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
    ServiceWorkerState
    State() const
    {
-@@ -414,16 +431,19 @@ public:
+@@ -434,16 +451,19 @@ public:
  
    void
    MaybeClaimClient(nsIDocument* aDocument,
@@ -268,8 +268,8 @@ diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManag
   void LoadRegistrations(
                   const nsTArray<ServiceWorkerRegistrationData>& aRegistrations);
  
-   NS_IMETHOD
-   AddRegistrationEventListener(const nsAString& aScope,
+   // Used by remove() and removeAll() when clearing history.
+   // MUST ONLY BE CALLED FROM UnregisterIfMatchesHost!
 diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 --- a/dom/workers/WorkerScope.cpp
 +++ b/dom/workers/WorkerScope.cpp
@@ -435,11 +435,11 @@ diff --git a/dom/workers/WorkerScope.h b/dom/workers/WorkerScope.h
 diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
 --- a/dom/workers/test/serviceworkers/mochitest.ini
 +++ b/dom/workers/test/serviceworkers/mochitest.ini
-@@ -75,16 +75,18 @@ support-files =
-   periodic.sjs
-   periodic/frame.html
-   periodic/register.html
-   periodic/unregister.html
+@@ -91,16 +91,18 @@ support-files =
+   swa/worker_scope_too_deep.js
+   swa/worker_scope_too_deep.js^headers^
+   swa/worker_scope_too_narrow.js
+   swa/worker_scope_too_narrow.js^headers^
    claim_oninstall_worker.js
    claim_worker_1.js
    claim_worker_2.js
@@ -454,15 +454,15 @@ diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/se
  [test_https_fetch_cloned_response.html]
  [test_https_synth_fetch_from_cached_sw.html]
  [test_match_all.html]
-@@ -108,8 +110,9 @@ support-files =
- [test_importscript.html]
- [test_client_focus.html]
- [test_bug1151916.html]
- [test_workerupdatefoundevent.html]
+@@ -128,8 +130,9 @@ support-files =
  [test_empty_serviceworker.html]
  [test_periodic_update.html]
  [test_claim_oninstall.html]
  [test_claim.html]
+ [test_periodic_https_update.html]
+ [test_sanitize.html]
+ [test_sanitize_domain.html]
+ [test_service_worker_allowed.html]
 +[test_skip_waiting.html]
 diff --git a/dom/workers/test/serviceworkers/skip_waiting_installed_worker.js b/dom/workers/test/serviceworkers/skip_waiting_installed_worker.js
 new file mode 100644
