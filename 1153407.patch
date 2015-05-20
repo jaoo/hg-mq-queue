@@ -1,6 +1,7 @@
 # HG changeset patch
-# Parent 891ca7b857b627d5895e50ffa5a2a7f419ee26d8
+# Parent 698d7568b99c3132adc9a17d548278a1f2064f86
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  4fb7ff694bf5944b76c20b2240fb3abdc55f9a4e
 Bug 1153407 - browser_toolbox_options_enable_serviceworkers_testing.js breaks other tests, needs to be e10s. r=ochameau
 
 diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/framework/test/browser.ini
@@ -24,26 +25,7 @@ diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/fram
  [browser_dynamic_tool_enabling.js]
  [browser_keybindings.js]
  [browser_new_activation_workflow.js]
-@@ -31,16 +32,17 @@ support-files =
- [browser_toolbox_options.js]
- [browser_toolbox_options_disable_buttons.js]
- [browser_toolbox_options_disable_cache-01.js]
- skip-if = e10s # Bug 1030318
- [browser_toolbox_options_disable_cache-02.js]
- skip-if = e10s # Bug 1030318
- [browser_toolbox_options_disable_js.js]
- skip-if = e10s # Bug 1030318
-+[browser_toolbox_options_enable_serviceworkers_testing.js]
- # [browser_toolbox_raise.js] # Bug 962258
- # skip-if = os == "win"
- [browser_toolbox_ready.js]
- [browser_toolbox_select_event.js]
- skip-if = e10s # Bug 1069044 - destroyInspector may hang during shutdown
- [browser_toolbox_sidebar.js]
- [browser_toolbox_sidebar_events.js]
- [browser_toolbox_sidebar_existing_tabs.js]
-@@ -57,14 +59,12 @@ skip-if = e10s # Bug 1069044 - destroyIn
- [browser_toolbox_view_source_04.js]
+@@ -58,14 +59,13 @@ skip-if = e10s # Bug 1069044 - destroyIn
  [browser_toolbox_window_reload_target.js]
  [browser_toolbox_window_shortcuts.js]
  skip-if = os == "mac" && os_version == "10.8" || os == "win" && os_version == "5.1" # Bug 851129 - Re-enable browser_toolbox_window_shortcuts.js test after leaks are fixed
@@ -51,8 +33,9 @@ diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/fram
  [browser_toolbox_zoom.js]
  [browser_toolbox_custom_host.js]
  [browser_toolbox_theme_registration.js]
--[browser_toolbox_options_enable_serviceworkers_testing.js]
+ [browser_toolbox_options_enable_serviceworkers_testing.js]
 -skip-if = true # Bug 1153407 - this test breaks subsequent tests and is not e10s compatible
+ [browser_toolbox_selected_tool_unavailable.js]
  
  # We want this test to run for mochitest-dt as well, so we include it here:
  [../../../base/content/test/general/browser_parsable_css.js]
