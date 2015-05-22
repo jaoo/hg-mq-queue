@@ -1,7 +1,8 @@
 # HG changeset patch
 # Parent 2f6ea66057fe37794d7fc061407495cdcece5443
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-Bug 1131352 - Add ServiceWorkerGlobalScope skipWaiting(). r=nsm
+# Parent  8d8df22fe72d7dbbb63ff735afe965497669a465
+Bug 1131352 - Part 1: Add ServiceWorkerGlobalScope skipWaiting(). r=nsm,baku
 
 diff --git a/dom/webidl/ServiceWorkerGlobalScope.webidl b/dom/webidl/ServiceWorkerGlobalScope.webidl
 --- a/dom/webidl/ServiceWorkerGlobalScope.webidl

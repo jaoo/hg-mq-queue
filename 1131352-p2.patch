@@ -1,0 +1,36 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  5b322b5925f62c93c7ab3df292d8a74ed67e037b
+Bug 1131352 - Part 2: Fix codegen issue. r=nsm
+
+diff --git a/dom/bindings/Codegen.py b/dom/bindings/Codegen.py
+--- a/dom/bindings/Codegen.py
++++ b/dom/bindings/Codegen.py
+@@ -11154,22 +11154,23 @@ class MemberProperties:
+ def memberProperties(m, descriptor):
+     props = MemberProperties()
+     if m.isMethod():
+         if m == descriptor.operations['Jsonifier']:
+             props.isGenericMethod = descriptor.needsSpecialGenericOps()
+             props.isJsonifier = True
+         elif (not m.isIdentifierLess() or m == descriptor.operations['Stringifier']):
+             if not m.isStatic() and descriptor.interface.hasInterfacePrototypeObject():
+-                if m.returnsPromise() and descriptor.needsSpecialGenericOps():
+-                    props.isPromiseReturningMethod = True
++                if descriptor.needsSpecialGenericOps():
++                    if m.returnsPromise():
++                        props.isPromiseReturningMethod = True
++                    else:
++                        props.isGenericMethod = True
+                 if m.getExtendedAttribute("CrossOriginCallable"):
+                     props.isCrossOriginMethod = True
+-                elif descriptor.needsSpecialGenericOps():
+-                    props.isGenericMethod = True
+     elif m.isAttr():
+         if not m.isStatic() and descriptor.interface.hasInterfacePrototypeObject():
+             if m.hasLenientThis():
+                 props.isLenientGetter = True
+             elif m.getExtendedAttribute("CrossOriginReadable"):
+                 props.isCrossOriginGetter = True
+             elif descriptor.needsSpecialGenericOps():
+                 props.isGenericGetter = True
