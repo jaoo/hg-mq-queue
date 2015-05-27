@@ -1,18 +1,18 @@
 # HG changeset patch
 # Parent 698d7568b99c3132adc9a17d548278a1f2064f86
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  4fb7ff694bf5944b76c20b2240fb3abdc55f9a4e
+# Parent  e537a1ba501ba047d21587a8fc9f83d92b518f1f
 Bug 1153407 - browser_toolbox_options_enable_serviceworkers_testing.js breaks other tests, needs to be e10s. r=ochameau
 
 diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/framework/test/browser.ini
 --- a/browser/devtools/framework/test/browser.ini
 +++ b/browser/devtools/framework/test/browser.ini
-@@ -6,16 +6,17 @@ support-files =
-   browser_toolbox_options_disable_js_iframe.html
+@@ -7,16 +7,17 @@ support-files =
    browser_toolbox_options_disable_cache.sjs
    browser_toolbox_sidebar_tool.xul
    code_math.js
    head.js
+   shared-head.js
    helper_disable_cache.js
    doc_theme.css
    doc_viewsource.html
@@ -23,9 +23,9 @@ diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/fram
  [browser_devtools_api.js]
  [browser_devtools_api_destroy.js]
  [browser_dynamic_tool_enabling.js]
- [browser_keybindings.js]
- [browser_new_activation_workflow.js]
-@@ -58,14 +59,13 @@ skip-if = e10s # Bug 1069044 - destroyIn
+ [browser_ignore_toolbox_network_requests.js]
+ [browser_keybindings_01.js]
+@@ -61,14 +62,13 @@ skip-if = e10s # Bug 1069044 - destroyIn
  [browser_toolbox_window_reload_target.js]
  [browser_toolbox_window_shortcuts.js]
  skip-if = os == "mac" && os_version == "10.8" || os == "win" && os_version == "5.1" # Bug 851129 - Re-enable browser_toolbox_window_shortcuts.js test after leaks are fixed
@@ -359,25 +359,7 @@ new file mode 100644
 diff --git a/browser/devtools/framework/test/head.js b/browser/devtools/framework/test/head.js
 --- a/browser/devtools/framework/test/head.js
 +++ b/browser/devtools/framework/test/head.js
-@@ -8,16 +8,17 @@ const { console } = Cu.import("resource:
- const { Promise: promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
- const { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
- const { ScratchpadManager } = Cu.import("resource:///modules/devtools/scratchpad-manager.jsm", {});
- 
- const URL_ROOT = "http://example.com/browser/browser/devtools/framework/test/";
- const CHROME_URL_ROOT = "chrome://mochitests/content/browser/browser/devtools/framework/test/";
- 
- let TargetFactory = devtools.TargetFactory;
-+let { generateUUID } = Cc['@mozilla.org/uuid-generator;1'].getService(Ci.nsIUUIDGenerator);
- 
- // All test are asynchronous
- waitForExplicitFinish();
- 
- // Uncomment this pref to dump all devtools emitted events to the console.
- // Services.prefs.setBoolPref("devtools.dump.emit", true);
- 
- function getFrameScript() {
-@@ -217,8 +218,93 @@ function *openScratchpadWindow () {
+@@ -60,8 +60,93 @@ function *openScratchpadWindow () {
    win.Scratchpad.addObserver({
      onReady: function () {
        win.Scratchpad.removeObserver(this);
@@ -471,3 +453,24 @@ diff --git a/browser/devtools/framework/test/head.js b/browser/devtools/framewor
 +
 +  return deferred.promise;
 +}
+diff --git a/browser/devtools/framework/test/shared-head.js b/browser/devtools/framework/test/shared-head.js
+--- a/browser/devtools/framework/test/shared-head.js
++++ b/browser/devtools/framework/test/shared-head.js
+@@ -3,16 +3,17 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ // This shared-head.js file is used for multiple directories in devtools.
+ const {console} = Cu.import("resource://gre/modules/devtools/Console.jsm", {});
+ const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
+ const {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
+ const {ScratchpadManager} = Cu.import("resource:///modules/devtools/scratchpad-manager.jsm", {});
+ const {TargetFactory} = devtools;
++const {generateUUID } = Cc['@mozilla.org/uuid-generator;1'].getService(Ci.nsIUUIDGenerator);
+ 
+ const TEST_DIR = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
+ const CHROME_URL_ROOT = TEST_DIR + "/";
+ const URL_ROOT = CHROME_URL_ROOT.replace("chrome://mochitests/content/", "http://example.com/");
+ 
+ // All test are asynchronous
+ waitForExplicitFinish();
+ 
