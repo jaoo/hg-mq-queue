@@ -1,6 +1,7 @@
 # HG changeset patch
 # Parent 8ea61086abd04f35e2e4e6f370fff9a170e72b00
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
+# Parent  f986e55c4e0b41c6b50bd74d287614b564d7895f
 Bug 1115820 - Add telemetry to ServiceWorkers. r=nsm
 
 diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
@@ -32,7 +33,7 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -17,16 +17,17 @@
+@@ -21,16 +21,17 @@
  #include "nsPIDOMWindow.h"
  #include "nsScriptLoader.h"
  #include "nsDebug.h"
@@ -43,14 +44,14 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  #include "mozilla/LoadContext.h"
 +#include "mozilla/Telemetry.h"
  #include "mozilla/dom/BindingUtils.h"
+ #include "mozilla/dom/ContentParent.h"
  #include "mozilla/dom/DOMError.h"
  #include "mozilla/dom/ErrorEvent.h"
  #include "mozilla/dom/Headers.h"
  #include "mozilla/dom/InternalHeaders.h"
  #include "mozilla/dom/Navigator.h"
  #include "mozilla/dom/PromiseNativeHandler.h"
- #include "mozilla/dom/Request.h"
-@@ -607,16 +608,19 @@ public:
+@@ -685,16 +686,19 @@ public:
      }
  
      if (aInCacheAndEqual) {
@@ -64,13 +65,13 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +
      nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
  
-     // FIXME: Bug 1130101 - Read max scope from Service-Worker-Allowed header.
-     nsAutoCString allowedPrefix;
-     nsresult rv = GetRequiredScopeStringPrefix(mRegistration->mScriptSpec, allowedPrefix);
+     nsCOMPtr<nsIURI> scriptURI;
+     nsresult rv = NS_NewURI(getter_AddRefs(scriptURI), mRegistration->mScriptSpec);
      if (NS_WARN_IF(NS_FAILED(rv))) {
        Fail(NS_ERROR_DOM_SECURITY_ERR);
        return;
-@@ -1004,16 +1008,19 @@ ServiceWorkerManager::Register(nsIDOMWin
+     }
+@@ -1157,16 +1161,19 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    nsRefPtr<ServiceWorkerResolveWindowPromiseOnUpdateCallback> cb =
      new ServiceWorkerResolveWindowPromiseOnUpdateCallback(window, promise);
@@ -90,28 +91,28 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerManager::AppendPendingOperation(ServiceWorkerJobQueue* aQueue,
                                               ServiceWorkerJob* aJob)
  {
-@@ -2161,16 +2168,17 @@ ServiceWorkerManager::MaybeStartControll
-   nsRefPtr<ServiceWorkerRegistrationInfo> registration =
-     GetServiceWorkerRegistrationInfo(aDoc);
-   if (registration) {
-     MOZ_ASSERT(!mControlledDocuments.Contains(aDoc));
-     registration->StartControllingADocument();
-     // Use the already_AddRefed<> form of Put to avoid the addref-deref since
-     // we don't need the registration pointer in this function anymore.
-     mControlledDocuments.Put(aDoc, registration.forget());
-+    Telemetry::Accumulate(Telemetry::SERVICE_WORKER_CONTROLLED_DOCUMENTS, 1);
-   }
+@@ -2368,16 +2375,17 @@ void
+ ServiceWorkerManager::StartControllingADocument(ServiceWorkerRegistrationInfo* aRegistration,
+                                                 nsIDocument* aDoc)
+ {
+   MOZ_ASSERT(aRegistration);
+   MOZ_ASSERT(aDoc);
+ 
+   aRegistration->StartControllingADocument();
+   mControlledDocuments.Put(aDoc, aRegistration);
++  Telemetry::Accumulate(Telemetry::SERVICE_WORKER_CONTROLLED_DOCUMENTS, 1);
  }
  
  void
- ServiceWorkerManager::MaybeStopControlling(nsIDocument* aDoc)
+ ServiceWorkerManager::StopControllingADocument(ServiceWorkerRegistrationInfo* aRegistration)
  {
-   MOZ_ASSERT(aDoc);
-   nsRefPtr<ServiceWorkerRegistrationInfo> registration;
+   aRegistration->StopControllingADocument();
+   if (!aRegistration->IsControllingDocuments()) {
+     if (aRegistration->mPendingUninstall) {
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
-@@ -7468,22 +7468,22 @@
+@@ -7411,22 +7411,22 @@
      "n_values": 3,
      "description": "Doorhanger shown = 0, Disable = 1, Enable = 2"
    },
@@ -136,7 +137,7 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
    },
    "LOOP_CLIENT_CALL_URL_SHARED": {
      "expires_in_version": "never",
-@@ -7968,21 +7968,43 @@
+@@ -7925,27 +7925,49 @@
      "kind": "exponential",
      "high": "60000",
      "n_buckets": 30,
@@ -181,5 +182,11 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
 +    "high": "120000",
 +    "n_buckets": 20,
 +    "description": "Tracking how long a ServiceWorker stays alive after it is spawned. File bugs in Core::DOM in case of a Telemetry regression."
-   }
- }
+   },
+   "GRAPHICS_SANITY_TEST": {
+     "expires_in_version": "never",
+     "alert_emails": ["gfx-telemetry-alerts@mozilla.com"],
+     "kind": "enumerated",
+     "n_values": 20,
+     "releaseChannelCollection": "opt-out",
+     "description": "Reports results from the graphics sanity test to track which drivers are having problems (0=TEST_PASSED, 1=TEST_FAILED_RENDER, 2=TEST_FAILED_VIDEO, 3=TEST_CRASHED)"
