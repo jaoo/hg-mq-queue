@@ -1,0 +1,71 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  78505202314e66d48fca3390ab3dd1ab56fbf302
+Bug 1168226 - ServiceWorkerRegistrar only use the scope when registering a service worker. r=baku
+
+diff --git a/b2g/app/b2g.js b/b2g/app/b2g.js
+--- a/b2g/app/b2g.js
++++ b/b2g/app/b2g.js
+@@ -1125,14 +1125,17 @@ pref("dom.requestSync.enabled", true);
+ 
+ // Resample touch events on b2g
+ pref("gfx.touch.resample", true);
+ 
+ // Comma separated list of activity names that can only be provided by
+ // the system app in dev mode.
+ pref("dom.activities.developer_mode_only", "import-app");
+ 
+-// mulet apparently loads firefox.js as well as b2g.js, so we have to explicitly
+-// disable serviceworkers here to get them disabled in mulet.
+-pref("dom.serviceWorkers.enabled", false);
++pref('network.disable.ipc.security', true);
++pref('dom.caches.enabled', true);
++pref('dom.apps.developer_mode', true);
++pref('dom.webcomponents.enabled', true);
++pref("dom.serviceWorkers.enabled", true);
++pref("dom.serviceWorkers.testing.enabled", true);
+ 
+ // Retain at most 10 processes' layers buffers
+ pref("layers.compositor-lru-size", 10);
+diff --git a/dom/workers/ServiceWorkerRegistrar.cpp b/dom/workers/ServiceWorkerRegistrar.cpp
+--- a/dom/workers/ServiceWorkerRegistrar.cpp
++++ b/dom/workers/ServiceWorkerRegistrar.cpp
+@@ -147,19 +147,35 @@ ServiceWorkerRegistrar::RegisterServiceW
+ 
+   {
+     MonitorAutoLock lock(mMonitor);
+     MOZ_ASSERT(mDataLoaded);
+ 
+     bool found = false;
+     for (uint32_t i = 0, len = mData.Length(); i < len; ++i) {
+       if (mData[i].scope() == aData.scope()) {
+-        mData[i] = aData;
+-        found = true;
+-        break;
++        const mozilla::ipc::PrincipalInfo& mInfo = mData[i].principal();
++        const mozilla::ipc::PrincipalInfo& aInfo = aData.principal();
++        if ((mInfo.type() == aInfo.type()) &&
++            (mInfo.type() == mozilla::ipc::PrincipalInfo::TContentPrincipalInfo)) {
++          const mozilla::ipc::ContentPrincipalInfo& mCInfo =
++            mInfo.get_ContentPrincipalInfo();
++          const mozilla::ipc::ContentPrincipalInfo& aCInfo =
++            aInfo.get_ContentPrincipalInfo();
++          if ((mCInfo.appId() == aCInfo.appId()) &&
++              (mCInfo.isInBrowserElement() == aCInfo.isInBrowserElement())) {
++            mData[i] = aData;
++            found = true;
++            break;
++          }
++        } else {
++          mData[i] = aData;
++          found = true;
++          break;
++        }
+       }
+     }
+ 
+     if (!found) {
+       mData.AppendElement(aData);
+     }
+   }
+ 
