@@ -1,8 +1,74 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  8a92dfdc8c780b90ce469ef1d374f125b7af8d3d
+# Parent  865f5477902ad579ef8cc3595f866ecc1c1e525b
 Bug 1153407 - browser_toolbox_options_enable_serviceworkers_testing.js breaks other tests, needs to be e10s. r=ochameau
 
+diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
+--- a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
++++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
+@@ -31,39 +31,39 @@
+           }
+           swr.unregister().then(result => {
+             result ? log("UnregistersCorrectly") : log("Error");
+             button.click();
+           });
+         });
+       }
+ 
+-      navigator.serviceWorker.register("serviceworker.js").then(
+-        swr => {
+-          var msg = "";
+-          var button = document.getElementById("button");
+-          if (swr.installing) {
+-            msg += "Installing worker/";
+-          }
+-          if (swr.waiting) {
+-            msg += "Waiting worker/";
+-          }
+-          if (swr.active) {
+-            msg += "Active worker/";
+-          }
+-          log(msg);
+-          button.click();
+-        },
+-        error => {
+-          var button = document.getElementById("button");
+-          if (error.name === "SecurityError") {
+-            log("SecurityError");
+-          }
+-          button.click();
+-      });
++      <!-- navigator.serviceWorker.register("serviceworker.js").then( -->
++      <!--   swr => { -->
++      <!--     var msg = ""; -->
++      <!--     var button = document.getElementById("button"); -->
++      <!--     if (swr.installing) { -->
++      <!--       msg += "Installing worker/"; -->
++      <!--     } -->
++      <!--     if (swr.waiting) { -->
++      <!--       msg += "Waiting worker/"; -->
++      <!--     } -->
++      <!--     if (swr.active) { -->
++      <!--       msg += "Active worker/"; -->
++      <!--     } -->
++      <!--     log(msg); -->
++      <!--     button.click(); -->
++      <!--   }, -->
++      <!--   error => { -->
++      <!--     var button = document.getElementById("button"); -->
++      <!--     if (error.name === "SecurityError") { -->
++      <!--       log("SecurityError"); -->
++      <!--     } -->
++      <!--     button.click(); -->
++      <!-- }); -->
+     </script>
+   </head>
+   <body>
+     <h1>Test in page</h1>
+     <input id="button"
+            type="button"
+            value="Worker clicks here"/>
+     <br>
 diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
 --- a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
 +++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
@@ -44,8 +110,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
      gDevTools.showToolbox(target).then(testSelectTool);
    }, true);
  
--  content.location = TEST_URI;
-+  // content.location = TEST_URI;
+   content.location = TEST_URI;
  }
  
  function testSelectTool(aToolbox) {
