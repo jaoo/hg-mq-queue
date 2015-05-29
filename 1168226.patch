@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  78505202314e66d48fca3390ab3dd1ab56fbf302
+# Parent  2841a23f7fae514d0b5738cb27916dd2f1f0d06d
 Bug 1168226 - ServiceWorkerRegistrar only use the scope when registering a service worker. r=baku
 
 diff --git a/b2g/app/b2g.js b/b2g/app/b2g.js
 --- a/b2g/app/b2g.js
 +++ b/b2g/app/b2g.js
-@@ -1125,14 +1125,17 @@ pref("dom.requestSync.enabled", true);
+@@ -1127,14 +1127,17 @@ pref("dom.requestSync.enabled", true);
  
  // Resample touch events on b2g
  pref("gfx.touch.resample", true);
@@ -30,12 +30,17 @@ diff --git a/b2g/app/b2g.js b/b2g/app/b2g.js
 diff --git a/dom/workers/ServiceWorkerRegistrar.cpp b/dom/workers/ServiceWorkerRegistrar.cpp
 --- a/dom/workers/ServiceWorkerRegistrar.cpp
 +++ b/dom/workers/ServiceWorkerRegistrar.cpp
-@@ -147,19 +147,35 @@ ServiceWorkerRegistrar::RegisterServiceW
+@@ -144,22 +144,42 @@ ServiceWorkerRegistrar::RegisterServiceW
+     NS_WARNING("Failed to register a serviceWorker during shutting down.");
+     return;
+   }
  
    {
      MonitorAutoLock lock(mMonitor);
      MOZ_ASSERT(mDataLoaded);
  
++    const mozilla::ipc::PrincipalInfo& aInfo = aData.principal();
++
      bool found = false;
      for (uint32_t i = 0, len = mData.Length(); i < len; ++i) {
        if (mData[i].scope() == aData.scope()) {
@@ -43,19 +48,21 @@ diff --git a/dom/workers/ServiceWorkerRegistrar.cpp b/dom/workers/ServiceWorkerR
 -        found = true;
 -        break;
 +        const mozilla::ipc::PrincipalInfo& mInfo = mData[i].principal();
-+        const mozilla::ipc::PrincipalInfo& aInfo = aData.principal();
++
 +        if ((mInfo.type() == aInfo.type()) &&
 +            (mInfo.type() == mozilla::ipc::PrincipalInfo::TContentPrincipalInfo)) {
 +          const mozilla::ipc::ContentPrincipalInfo& mCInfo =
 +            mInfo.get_ContentPrincipalInfo();
 +          const mozilla::ipc::ContentPrincipalInfo& aCInfo =
 +            aInfo.get_ContentPrincipalInfo();
++
 +          if ((mCInfo.appId() == aCInfo.appId()) &&
 +              (mCInfo.isInBrowserElement() == aCInfo.isInBrowserElement())) {
 +            mData[i] = aData;
 +            found = true;
 +            break;
 +          }
++
 +        } else {
 +          mData[i] = aData;
 +          found = true;
