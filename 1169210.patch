@@ -1,0 +1,49 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  f986e55c4e0b41c6b50bd74d287614b564d7895f
+Bug 1169210 - Can't call content service worker from chrome. r=nsm
+
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -1044,31 +1044,32 @@ ContinueInstallTask::ContinueAfterWorker
+ NS_IMETHODIMP
+ ServiceWorkerManager::Register(nsIDOMWindow* aWindow,
+                                nsIURI* aScopeURI,
+                                nsIURI* aScriptURI,
+                                nsISupports** aPromise)
+ {
+   AssertIsOnMainThread();
+ 
+-  // XXXnsm Don't allow chrome callers for now, we don't support chrome
+-  // ServiceWorkers.
+-  MOZ_ASSERT(!nsContentUtils::IsCallerChrome());
+-
+   nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aWindow);
+-
+-  nsCOMPtr<nsPIDOMWindow> outerWindow = window->GetOuterWindow();
+-  bool serviceWorkersTestingEnabled =
+-    outerWindow->GetServiceWorkersTestingEnabled();
++  MOZ_ASSERT(window);
+ 
+   nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+   if (!doc) {
+     return NS_ERROR_FAILURE;
+   }
+ 
++  // XXXnsm Don't allow service workers to register when the *document* is
++  // chrome for now.
++  MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()));
++
++  nsCOMPtr<nsPIDOMWindow> outerWindow = window->GetOuterWindow();
++  bool serviceWorkersTestingEnabled =
++    outerWindow->GetServiceWorkersTestingEnabled();
++
+   nsCOMPtr<nsIURI> documentURI = doc->GetBaseURI();
+ 
+   bool authenticatedOrigin = false;
+   if (Preferences::GetBool("dom.serviceWorkers.testing.enabled") ||
+       serviceWorkersTestingEnabled) {
+     authenticatedOrigin = true;
+   }
+ 
