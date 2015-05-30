@@ -31,8 +31,8 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      return NS_ERROR_FAILURE;
    }
  
-+  // XXXnsm Don't allow service workers to register when the *document* is
-+  // chrome for now.
++  // Don't allow service workers to register when the *document* is chrome for
++  // now.
 +  MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()));
 +
 +  nsCOMPtr<nsPIDOMWindow> outerWindow = window->GetOuterWindow();
@@ -69,8 +69,8 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      return NS_ERROR_FAILURE;
    }
  
-+  // XXXnsm Don't allow service workers to register when the *document* is
-+  // chrome for now.
++  // Don't allow service workers to register when the *document* is chrome for
++  // now.
 +  MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()));
 +
    nsCOMPtr<nsIGlobalObject> sgo = do_QueryInterface(window);
@@ -103,8 +103,8 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      return NS_ERROR_FAILURE;
    }
  
-+  // XXXnsm Don't allow service workers to register when the *document* is
-+  // chrome for now.
++  // Don't allow service workers to register when the *document* is chrome for
++  // now.
 +  MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()));
 +
    nsCOMPtr<nsIGlobalObject> sgo = do_QueryInterface(window);
@@ -137,8 +137,8 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      return NS_ERROR_FAILURE;
    }
  
-+  // XXXnsm Don't allow service workers to register when the *document* is
-+  // chrome for now.
++  // Don't allow service workers to register when the *document* is chrome for
++  // now.
 +  MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()));
 +
    MOZ_ASSERT(!mPendingReadyPromises.Contains(window));
