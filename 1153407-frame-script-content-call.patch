@@ -1,20 +1,50 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  59df398c2ce2644e2fde03a6d0c9597bc6df2304
+# Parent  f3f0b77a80e3cbd5ac19d2eeb32a0bfdc6e089a1
 Bug 1153407 - browser_toolbox_options_enable_serviceworkers_testing.js breaks other tests, needs to be e10s. r=ochameau
 
 diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
 --- a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
 +++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
-@@ -31,39 +31,39 @@
-           }
-           swr.unregister().then(result => {
-             result ? log("UnregistersCorrectly") : log("Error");
-             button.click();
-           });
-         });
-       }
- 
+@@ -1,77 +1,10 @@
+ <!DOCTYPE html>
+ <html>
+   <head>
+     <title>browser_toolbox_options_enable_serviceworkers_testing.html</title>
+     <meta charset="UTF-8">
+-    <style>
+-      div {
+-        width: 360px;
+-        height: 24px;
+-        border: 1px solid #000;
+-        margin-top: 10px;
+-      }
+-
+-      h1 {
+-        font-size: 20px
+-      }
+-    </style>
+-    <script type="application/javascript;version=1.8">
+-      function log(msg) {
+-        var output = document.getElementById("output");
+-
+-        output.innerHTML = msg;
+-      }
+-
+-      function unregister() {
+-        navigator.serviceWorker.getRegistration().then(swr => {
+-          if (!swr) {
+-           log("Error");
+-           button.click();
+-           return;
+-          }
+-          swr.unregister().then(result => {
+-            result ? log("UnregistersCorrectly") : log("Error");
+-            button.click();
+-          });
+-        });
+-      }
+-
 -      navigator.serviceWorker.register("serviceworker.js").then(
 -        swr => {
 -          var msg = "";
@@ -38,43 +68,36 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 -          }
 -          button.click();
 -      });
-+      <!-- navigator.serviceWorker.register("serviceworker.js").then( -->
-+      <!--   swr => { -->
-+      <!--     var msg = ""; -->
-+      <!--     var button = document.getElementById("button"); -->
-+      <!--     if (swr.installing) { -->
-+      <!--       msg += "Installing worker/"; -->
-+      <!--     } -->
-+      <!--     if (swr.waiting) { -->
-+      <!--       msg += "Waiting worker/"; -->
-+      <!--     } -->
-+      <!--     if (swr.active) { -->
-+      <!--       msg += "Active worker/"; -->
-+      <!--     } -->
-+      <!--     log(msg); -->
-+      <!--     button.click(); -->
-+      <!--   }, -->
-+      <!--   error => { -->
-+      <!--     var button = document.getElementById("button"); -->
-+      <!--     if (error.name === "SecurityError") { -->
-+      <!--       log("SecurityError"); -->
-+      <!--     } -->
-+      <!--     button.click(); -->
-+      <!-- }); -->
-     </script>
+-    </script>
    </head>
    <body>
-     <h1>Test in page</h1>
-     <input id="button"
-            type="button"
-            value="Worker clicks here"/>
-     <br>
+-    <h1>Test in page</h1>
+-    <input id="button"
+-           type="button"
+-           value="Worker clicks here"/>
+-    <br>
+-    <div id="output">No output</div>
+-    <br>
+-    <input id="unregister"
+-           type="button"
+-           value="Unregister"
+-           onclick="unregister()"/>
++    <h1>Nothing to see here, move along</h1>
+   </body>
+ </html>
 diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
 --- a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
 +++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
-@@ -13,52 +13,70 @@ const FRAME_SCRIPT_URL =
-   "browser_toolbox_options_enable_serviceworkers_testing_frame_script.js";
+@@ -6,164 +6,117 @@
  
+ const COMMON_FRAME_SCRIPT_URL =
+   "chrome://browser/content/devtools/frame-script-utils.js";
+ const ROOT_TEST_DIR =
+   getRootDirectory(gTestPath);
+ const FRAME_SCRIPT_URL =
+   ROOT_TEST_DIR +
+   "browser_toolbox_options_enable_serviceworkers_testing_frame_script.js";
+-
  const TEST_URI = URL_ROOT +
                   "browser_toolbox_options_enable_serviceworkers_testing.html";
  
@@ -82,7 +105,6 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
  
  let toolbox;
 -let doc;
-+// let doc;
  
  function test() {
    // Note: Pref dom.serviceWorkers.testing.enabled is false since we are testing
@@ -103,10 +125,10 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
  
    linkedBrowser.messageManager.loadFrameScript(COMMON_FRAME_SCRIPT_URL, false);
    linkedBrowser.messageManager.loadFrameScript(FRAME_SCRIPT_URL, false);
++
    gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
      gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
 -    doc = content.document;
-+    // doc = content.document;
      gDevTools.showToolbox(target).then(testSelectTool);
    }, true);
  
@@ -115,103 +137,273 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
  
  function testSelectTool(aToolbox) {
    toolbox = aToolbox;
-   toolbox.once("options-selected", () => {
+-  toolbox.once("options-selected", () => {
 -    testRegisterFails().then(testRegisterInstallingWorker);
-+    // testRegisterFails().then(start);
-+    start();
-   });
+-  });
++  toolbox.once("options-selected", start);
    toolbox.selectTool("options");
  }
  
+-function testRegisterFails() {
+-  let deferred = promise.defer();
+-
+-  function doTheCheck() {
+-    getNodeInfo("#output").then(output => {
+-      info("Testing it doesn't registers correctly until enable testing");
+-      is(output.textContent,
+-         "SecurityError",
+-         "SecurityError expected");
+-      deferred.resolve();
+-    });
+-  }
+-
+-  getNodeInfo("#output").then(output => {
+-    if (output.textContent !== "No output") {
+-      doTheCheck();
+-    } else {
+-      waitForSWMessage("#button").then(doTheCheck);
+-    }
+-  });
+-
+-  return deferred.promise;
 +function register() {
 +  return executeInContent("devtools:test:register");
-+}
-+
+ }
+ 
+-function testRegisterInstallingWorker() {
+-  toggleServiceWorkersTestingCheckbox().then(() => {
+-
+-    function doTheCheck() {
+-      getNodeInfo("#output").then(output => {
+-        info("Testing it registers correctly and there is an installing worker");
+-        is(output.textContent,
+-           "Installing worker/",
+-           "Installing worker expected");
+-        testRegisterFailsWhenToolboxCloses();
+-      });
+-    }
+-
+-    getNodeInfo("#output").then(output => {
+-      if (output.textContent !== "No output") {
+-        doTheCheck();
+-      } else {
+-        waitForSWMessage("#button").then(doTheCheck);
+-      }
+-    });
+-  });
 +function unregister(swr) {
 +  return executeInContent("devtools:test:unregister");
-+}
-+
-+function start() {
-+  toggleServiceWorkersTestingCheckbox()
-+    .then(register)
-+    .then(unregister)
-+    .catch(function(e) {
-+      ok(false, "Some test failed with error " + e);
-+    }).then(finishUp);
-+}
-+
- function testRegisterFails() {
-   let deferred = promise.defer();
- 
-   function doTheCheck() {
-     getNodeInfo("#output").then(output => {
-       info("Testing it doesn't registers correctly until enable testing");
-       is(output.textContent,
-          "SecurityError",
-@@ -111,17 +129,17 @@ function testRegisterFailsWhenToolboxClo
-          .then(finishUp);
  }
  
- function reload() {
-   let deferred = promise.defer();
- 
-   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
-     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
+-// Workers should be turned back off when we closes the toolbox
+-function testRegisterFailsWhenToolboxCloses() {
+-  info("Testing it disables worker when closing the toolbox");
+-  toolbox.destroy()
+-         .then(reload)
+-         .then(testRegisterFails)
+-         .then(testUnregister)
+-         .then(finishUp);
+-}
+-
+-function reload() {
+-  let deferred = promise.defer();
+-
+-  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
+-    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
 -    doc = content.document;
-+    // doc = content.document;
-     deferred.resolve();
-   }, true);
- 
-   executeInContent("devtools:test:reload", {}, {}, false);
-   return deferred.promise;
+-    deferred.resolve();
+-  }, true);
+-
+-  executeInContent("devtools:test:reload", {}, {}, false);
+-  return deferred.promise;
+-}
+-
+-function testUnregister() {
+-  let deferred = promise.defer();
+-
+-  function doTheCheck() {
+-    getNodeInfo("#output").then(output => {
+-      info("Testing it unregisters correctly");
+-      is(output.textContent,
+-         "UnregistersCorrectly",
+-         "Unregisters correctly");
+-      deferred.resolve();
+-    });
+-  }
+-
+-  waitForSWMessage("#button").then(doTheCheck);
+-  evalInDebuggee("unregister()");
+-
+-  return deferred.promise;
++function testRegisterFails(data) {
++  is(data.success, false, "Register should fail with security error");
++  return promise.resolve();
  }
  
- function testUnregister() {
-@@ -159,11 +177,12 @@ function toggleServiceWorkersTestingChec
+ function toggleServiceWorkersTestingCheckbox() {
+-  let deferred = promise.defer();
+-
+   let panel = toolbox.getCurrentPanel();
+   let cbx = panel.panelDoc.getElementById(ELEMENT_ID);
+ 
+   cbx.scrollIntoView();
+ 
+   if (cbx.checked) {
+     info("Clearing checkbox to disable service workers testing");
+   } else {
+     info("Checking checkbox to enable service workers testing");
+   }
  
    cbx.click();
  
-   return reload();
+-  return reload();
++  return promise.resolve();
++}
++
++function reload() {
++  let deferred = promise.defer();
++
++  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
++    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
++    deferred.resolve();
++  }, true);
++
++  executeInContent("devtools:test:reload", {}, {}, false);
++  return deferred.promise;
++}
++
++function testRegisterSuccesses(data) {
++  is(data.success, true, "Register should success");
++  return promise.resolve();
++}
++
++function start() {
++  register()
++    .then(testRegisterFails)
++    .then(toggleServiceWorkersTestingCheckbox)
++    .then(reload)
++    .then(register)
++    .then(testRegisterSuccesses)
++    .then(unregister)
++    // Workers should be turned back off when we closes the toolbox
++    .then(toolbox.destroy)
++    .then(reload)
++    .then(register)
++    .then(testRegisterFails)
++    .catch(function(e) {
++      ok(false, "Some test failed with error " + e);
++    }).then(finishUp);
  }
  
  function finishUp() {
    gBrowser.removeCurrentTab();
 -  toolbox = doc = null;
-+  // toolbox = doc = null;
 +  toolbox = null;
    finish();
  }
 diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_frame_script.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_frame_script.js
 --- a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_frame_script.js
 +++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_frame_script.js
-@@ -9,16 +9,30 @@ const {classes: Cc, interfaces: Ci, util
- const { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
- devtools.lazyImporter(this, "promise", "resource://gre/modules/Promise.jsm", "Promise");
- devtools.lazyImporter(this, "Task", "resource://gre/modules/Task.jsm", "Task");
- const loader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
-             .getService(Ci.mozIJSSubScriptLoader);
- let EventUtils = {};
- loader.loadSubScript("chrome://marionette/content/EventUtils.js", EventUtils);
+@@ -1,63 +1,24 @@
+ /* Any copyright is dedicated to the Public Domain.
+  http://creativecommons.org/publicdomain/zero/1.0/ */
  
+-// A helper frame-script for browser/devtools/framework tests.
++// A helper frame-script for browser/devtools/framework service worker tests.
+ 
+ "use strict";
+ 
+-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
+-const { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
+-devtools.lazyImporter(this, "promise", "resource://gre/modules/Promise.jsm", "Promise");
+-devtools.lazyImporter(this, "Task", "resource://gre/modules/Task.jsm", "Task");
+-const loader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
+-            .getService(Ci.mozIJSSubScriptLoader);
+-let EventUtils = {};
+-loader.loadSubScript("chrome://marionette/content/EventUtils.js", EventUtils);
 +addMessageListener("devtools:test:register", function(msg) {
-+  content.navigator.serviceWorker.register("serviceworker.js").then(swr => {
-+    sendAsyncMessage("devtools:test:register");
-+  });
++  content.navigator.serviceWorker.register("serviceworker.js")
++    .then(swr => {
++      sendAsyncMessage("devtools:test:register", {success: true});
++    }, error => {
++      sendAsyncMessage("devtools:test:register", {success: false});
++    });
 +});
-+
+ 
+-addMessageListener("devtools:test:waitForSWMessage", function(msg) {
+-  let {selector} = msg.data;
+-  let node = superQuerySelector(selector);
+-
+-  if (!node) {
+-    sendAsyncMessage("devtools:test:waitForSWMessage");
+-  }
+-  node.addEventListener('click', function onClick() {
+-    node.removeEventListener('click', onClick);
+-    sendAsyncMessage("devtools:test:waitForSWMessage");
 +addMessageListener("devtools:test:unregister", function(msg) {
 +  content.navigator.serviceWorker.getRegistration().then(swr => {
 +    swr.unregister().then(result => {
-+      sendAsyncMessage("devtools:test:unregister");
++      sendAsyncMessage("devtools:test:unregister",
++                       {success: result ? true : false});
 +    });
-+  });
-+});
-+
- addMessageListener("devtools:test:waitForSWMessage", function(msg) {
-   let {selector} = msg.data;
-   let node = superQuerySelector(selector);
+   });
+ });
+-
+-addMessageListener("devtools:test:unregisterSW", function(msg) {
+-  let {selector} = msg.data;
+-  let node = superQuerySelector(selector);
+-
+-  if (node) {
+-    node.click();
+-  }
+-});
+-
+-/**
+- * Like document.querySelector but can go into iframes too.
+- * ".container iframe || .sub-container div" will first try to find the node
+- * matched by ".container iframe" in the root document, then try to get the
+- * content document inside it, and then try to match ".sub-container div" inside
+- * this document.
+- * Any selector coming before the || separator *MUST* match a frame node.
+- * @param {String} superSelector.
+- * @return {DOMNode} The node, or null if not found.
+- */
+-function superQuerySelector(superSelector, root=content.document) {
+-  let frameIndex = superSelector.indexOf("||");
+-  if (frameIndex === -1) {
+-    return root.querySelector(superSelector);
+-  } else {
+-    let rootSelector = superSelector.substring(0, frameIndex).trim();
+-    let childSelector = superSelector.substring(frameIndex+2).trim();
+-    root = root.querySelector(rootSelector);
+-    if (!root || !root.contentWindow) {
+-      return null;
+-    }
+-
+-    return superQuerySelector(childSelector, root.contentWindow.document);
+-  }
+-}
+diff --git a/browser/devtools/framework/test/head.js b/browser/devtools/framework/test/head.js
+--- a/browser/devtools/framework/test/head.js
++++ b/browser/devtools/framework/test/head.js
+@@ -114,20 +114,16 @@ function executeInContent(name, data={},
+  * Get information about a DOM element, identified by its selector.
+  * @param {String} selector.
+  * @return {Promise} a promise that resolves to the element's information.
+  */
+ function getNodeInfo(selector) {
+   return executeInContent("devtools:test:getDomElementInfo", {selector});
+ }
  
-   if (!node) {
-     sendAsyncMessage("devtools:test:waitForSWMessage");
-   }
-   node.addEventListener('click', function onClick() {
+-function waitForSWMessage(selector) {
+-  return executeInContent("devtools:test:waitForSWMessage", {selector});
+-}
+-
+ /**
+  * Takes a string `script` and evaluates it directly in the content
+  * in potentially a different process.
+  */
+ function evalInDebuggee (script) {
+   let deferred = promise.defer();
+ 
+   let mm = gBrowser.selectedBrowser.messageManager;

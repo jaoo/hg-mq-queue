@@ -1,7 +1,6 @@
 # HG changeset patch
-# Parent 698d7568b99c3132adc9a17d548278a1f2064f86
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  e537a1ba501ba047d21587a8fc9f83d92b518f1f
+# Parent  37d971d6f79ab21ed950a187e3b467195d0f85cd
 Bug 1153407 - browser_toolbox_options_enable_serviceworkers_testing.js breaks other tests, needs to be e10s. r=ochameau
 
 diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/framework/test/browser.ini
@@ -43,74 +42,70 @@ diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/fram
 diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
 --- a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
 +++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
-@@ -1,32 +1,46 @@
+@@ -1,58 +1,10 @@
  <!DOCTYPE html>
  <html>
    <head>
      <title>browser_toolbox_options_enable_serviceworkers_testing.html</title>
      <meta charset="UTF-8">
-     <style>
-       div {
+-    <style>
+-      div {
 -        width: 260px;
-+        width: 360px;
-         height: 24px;
-         border: 1px solid #000;
-         margin-top: 10px;
-       }
- 
-       h1 {
-         font-size: 20px
-       }
-     </style>
-     <script type="application/javascript;version=1.8">
-       function log(msg) {
-         var output = document.getElementById("output");
- 
-         output.innerHTML = msg;
-       }
- 
-+      function unregister() {
-+        navigator.serviceWorker.getRegistration().then(swr => {
-+          if (!swr) {
-+           log("Error");
-+           button.click();
-+           return;
-+          }
-+          swr.unregister().then(result => {
-+            result ? log("UnregistersCorrectly") : log("Error");
-+            button.click();
-+          });
-+        });
-+      }
-+
-       navigator.serviceWorker.register("serviceworker.js").then(
-         swr => {
-           var msg = "";
-           var button = document.getElementById("button");
-           if (swr.installing) {
-             msg += "Installing worker/";
-           }
-           if (swr.waiting) {
-@@ -49,10 +63,15 @@
+-        height: 24px;
+-        border: 1px solid #000;
+-        margin-top: 10px;
+-      }
+-
+-      h1 {
+-        font-size: 20px
+-      }
+-    </style>
+-    <script type="application/javascript;version=1.8">
+-      function log(msg) {
+-        var output = document.getElementById("output");
+-
+-        output.innerHTML = msg;
+-      }
+-
+-      navigator.serviceWorker.register("serviceworker.js").then(
+-        swr => {
+-          var msg = "";
+-          var button = document.getElementById("button");
+-          if (swr.installing) {
+-            msg += "Installing worker/";
+-          }
+-          if (swr.waiting) {
+-            msg += "Waiting worker/";
+-          }
+-          if (swr.active) {
+-            msg += "Active worker/";
+-          }
+-          log(msg);
+-          button.click();
+-        },
+-        error => {
+-          var button = document.getElementById("button");
+-          if (error.name === "SecurityError") {
+-            log("SecurityError");
+-          }
+-          button.click();
+-      });
+-    </script>
    </head>
    <body>
-     <h1>Test in page</h1>
-     <input id="button"
-            type="button"
-            value="Worker clicks here"/>
-     <br>
-     <div id="output">No output</div>
-+    <br>
-+    <input id="unregister"
-+           type="button"
-+           value="Unregister"
-+           onclick="unregister()"/>
+-    <h1>Test in page</h1>
+-    <input id="button"
+-           type="button"
+-           value="Worker clicks here"/>
+-    <br>
+-    <div id="output">No output</div>
++    <h1>Nothing to see here, move along</h1>
    </body>
  </html>
 diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
 --- a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
 +++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
-@@ -1,14 +1,22 @@
+@@ -1,143 +1,122 @@
  /* Any copyright is dedicated to the Public Domain.
   * http://creativecommons.org/publicdomain/zero/1.0/ */
  
@@ -124,66 +119,67 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 +const FRAME_SCRIPT_URL =
 +  ROOT_TEST_DIR +
 +  "browser_toolbox_options_enable_serviceworkers_testing_frame_script.js";
-+
  const TEST_URI = URL_ROOT +
                   "browser_toolbox_options_enable_serviceworkers_testing.html";
  
  const ELEMENT_ID = "devtools-enable-serviceWorkersTesting";
  
  let toolbox;
- let doc;
+-let doc;
  
-@@ -18,19 +26,22 @@ function test() {
+ function test() {
+   // Note: Pref dom.serviceWorkers.testing.enabled is false since we are testing
+   // the same capabilities are enabled with the devtool pref.
    SpecialPowers.pushPrefEnv({"set": [
      ["dom.serviceWorkers.exemptFromPerDomainMax", true],
      ["dom.serviceWorkers.enabled", true],
      ["dom.serviceWorkers.testing.enabled", false]
-   ]}, start);
+-  ]}, start);
++  ]}, init);
  }
  
- function start() {
+-function start() {
 -  gBrowser.selectedTab = gBrowser.addTab();
++function init() {
 +  let tab = gBrowser.selectedTab = gBrowser.addTab();
    let target = TargetFactory.forTab(gBrowser.selectedTab);
 +  let linkedBrowser = tab.linkedBrowser;
- 
++
 +  linkedBrowser.messageManager.loadFrameScript(COMMON_FRAME_SCRIPT_URL, false);
 +  linkedBrowser.messageManager.loadFrameScript(FRAME_SCRIPT_URL, false);
+ 
    gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
      gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-     doc = content.document;
+-    doc = content.document;
      gDevTools.showToolbox(target).then(testSelectTool);
    }, true);
  
    content.location = TEST_URI;
  }
-@@ -41,83 +52,98 @@ function testSelectTool(aToolbox) {
-     testRegisterFails().then(testRegisterInstallingWorker);
-   });
+ 
+ function testSelectTool(aToolbox) {
+   toolbox = aToolbox;
+-  toolbox.once("options-selected", () => {
+-    testRegisterFails().then(testRegisterInstallingWorker);
+-  });
++  toolbox.once("options-selected", start);
    toolbox.selectTool("options");
  }
  
- function testRegisterFails() {
-   let deferred = promise.defer();
- 
+-function testRegisterFails() {
+-  let deferred = promise.defer();
+-
 -  let output = doc.getElementById("output");
 -  let button = doc.getElementById("button");
 -
-   function doTheCheck() {
+-  function doTheCheck() {
 -    info("Testing it doesn't registers correctly until enable testing");
 -    is(output.textContent,
 -       "SecurityError",
 -       "SecurityError expected");
 -    deferred.resolve();
-+    getNodeInfo("#output").then(output => {
-+      info("Testing it doesn't registers correctly until enable testing");
-+      is(output.textContent,
-+         "SecurityError",
-+         "SecurityError expected");
-+      deferred.resolve();
-+    });
-   }
- 
+-  }
+-
 -  if (output.textContent !== "No output") {
 -    doTheCheck();
 -  }
@@ -191,37 +187,26 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 -  button.addEventListener('click', function onClick() {
 -    button.removeEventListener('click', onClick);
 -    doTheCheck();
-+  getNodeInfo("#output").then(output => {
-+    if (output.textContent !== "No output") {
-+      doTheCheck();
-+    } else {
-+      waitForSWMessage("#button").then(doTheCheck);
-+    }
-   });
- 
-   return deferred.promise;
+-  });
+-
+-  return deferred.promise;
++function register() {
++  return executeInContent("devtools:test:register");
  }
  
- function testRegisterInstallingWorker() {
-   toggleServiceWorkersTestingCheckbox().then(() => {
+-function testRegisterInstallingWorker() {
+-  toggleServiceWorkersTestingCheckbox().then(() => {
 -    let output = doc.getElementById("output");
 -    let button = doc.getElementById("button");
- 
-     function doTheCheck() {
+-
+-    function doTheCheck() {
 -      info("Testing it registers correctly and there is an installing worker");
 -      is(output.textContent,
 -         "Installing worker/",
 -         "Installing worker expected");
 -      testRegisterFailsWhenToolboxCloses();
-+      getNodeInfo("#output").then(output => {
-+        info("Testing it registers correctly and there is an installing worker");
-+        is(output.textContent,
-+           "Installing worker/",
-+           "Installing worker expected");
-+        testRegisterFailsWhenToolboxCloses();
-+      });
-     }
- 
+-    }
+-
 -    if (output.textContent !== "No output") {
 -      doTheCheck();
 -    }
@@ -229,137 +214,104 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 -    button.addEventListener('click', function onClick() {
 -      button.removeEventListener('click', onClick);
 -      doTheCheck();
-+    getNodeInfo("#output").then(output => {
-+      if (output.textContent !== "No output") {
-+        doTheCheck();
-+      } else {
-+        waitForSWMessage("#button").then(doTheCheck);
-+      }
-     });
-   });
+-    });
+-  });
++function unregister(swr) {
++  return executeInContent("devtools:test:unregister");
  }
  
- // Workers should be turned back off when we closes the toolbox
- function testRegisterFailsWhenToolboxCloses() {
+-// Workers should be turned back off when we closes the toolbox
+-function testRegisterFailsWhenToolboxCloses() {
 -  info("Testing it disable worker when closing the toolbox");
-+  info("Testing it disables worker when closing the toolbox");
-   toolbox.destroy()
-          .then(reload)
-          .then(testRegisterFails)
-+         .then(testUnregister)
-          .then(finishUp);
- }
- 
- function reload() {
-   let deferred = promise.defer();
- 
-   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
-     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-     doc = content.document;
-     deferred.resolve();
-   }, true);
- 
+-  toolbox.destroy()
+-         .then(reload)
+-         .then(testRegisterFails)
+-         .then(finishUp);
+-}
+-
+-function reload() {
+-  let deferred = promise.defer();
+-
+-  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
+-    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
+-    doc = content.document;
+-    deferred.resolve();
+-  }, true);
+-
 -  let mm = getFrameScript();
 -  mm.sendAsyncMessage("devtools:test:reload");
+-
+-  return deferred.promise;
++function testRegisterFails(data) {
++  is(data.success, false, "Register should fail with security error");
++  return promise.resolve();
+ }
+ 
+ function toggleServiceWorkersTestingCheckbox() {
+-  let deferred = promise.defer();
+-
+   let panel = toolbox.getCurrentPanel();
+   let cbx = panel.panelDoc.getElementById(ELEMENT_ID);
+ 
+   cbx.scrollIntoView();
+ 
+   if (cbx.checked) {
+     info("Clearing checkbox to disable service workers testing");
+   } else {
+     info("Checking checkbox to enable service workers testing");
+   }
+ 
+   cbx.click();
+ 
+-  return reload();
++  return promise.resolve();
++}
++
++function reload() {
++  let deferred = promise.defer();
++
++  gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
++    gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
++    deferred.resolve();
++  }, true);
++
 +  executeInContent("devtools:test:reload", {}, {}, false);
 +  return deferred.promise;
 +}
 +
-+function testUnregister() {
-+  let deferred = promise.defer();
++function testRegisterSuccesses(data) {
++  is(data.success, true, "Register should success");
++  return promise.resolve();
++}
 +
-+  function doTheCheck() {
-+    getNodeInfo("#output").then(output => {
-+      info("Testing it unregisters correctly");
-+      is(output.textContent,
-+         "UnregistersCorrectly",
-+         "Unregisters correctly");
-+      deferred.resolve();
-+    });
-+  }
-+
-+  waitForSWMessage("#button").then(doTheCheck);
-+  evalInDebuggee("unregister()");
- 
-   return deferred.promise;
++function start() {
++  register()
++    .then(testRegisterFails)
++    .then(toggleServiceWorkersTestingCheckbox)
++    .then(reload)
++    .then(register)
++    .then(testRegisterSuccesses)
++    .then(unregister)
++    // Workers should be turned back off when we closes the toolbox
++    .then(toolbox.destroy)
++    .then(reload)
++    .then(register)
++    .then(testRegisterFails)
++    .catch(function(e) {
++      ok(false, "Some test failed with error " + e);
++    }).then(finishUp);
  }
  
- function toggleServiceWorkersTestingCheckbox() {
-   let deferred = promise.defer();
- 
-   let panel = toolbox.getCurrentPanel();
-diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_frame_script.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_frame_script.js
-new file mode 100644
---- /dev/null
-+++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_frame_script.js
-@@ -0,0 +1,63 @@
-+/* Any copyright is dedicated to the Public Domain.
-+ http://creativecommons.org/publicdomain/zero/1.0/ */
-+
-+// A helper frame-script for browser/devtools/framework tests.
-+
-+"use strict";
-+
-+const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
-+const { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
-+devtools.lazyImporter(this, "promise", "resource://gre/modules/Promise.jsm", "Promise");
-+devtools.lazyImporter(this, "Task", "resource://gre/modules/Task.jsm", "Task");
-+const loader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
-+            .getService(Ci.mozIJSSubScriptLoader);
-+let EventUtils = {};
-+loader.loadSubScript("chrome://marionette/content/EventUtils.js", EventUtils);
-+
-+addMessageListener("devtools:test:waitForSWMessage", function(msg) {
-+  let {selector} = msg.data;
-+  let node = superQuerySelector(selector);
-+
-+  if (!node) {
-+    sendAsyncMessage("devtools:test:waitForSWMessage");
-+  }
-+  node.addEventListener('click', function onClick() {
-+    node.removeEventListener('click', onClick);
-+    sendAsyncMessage("devtools:test:waitForSWMessage");
-+  });
-+});
-+
-+addMessageListener("devtools:test:unregisterSW", function(msg) {
-+  let {selector} = msg.data;
-+  let node = superQuerySelector(selector);
-+
-+  if (node) {
-+    node.click();
-+  }
-+});
-+
-+/**
-+ * Like document.querySelector but can go into iframes too.
-+ * ".container iframe || .sub-container div" will first try to find the node
-+ * matched by ".container iframe" in the root document, then try to get the
-+ * content document inside it, and then try to match ".sub-container div" inside
-+ * this document.
-+ * Any selector coming before the || separator *MUST* match a frame node.
-+ * @param {String} superSelector.
-+ * @return {DOMNode} The node, or null if not found.
-+ */
-+function superQuerySelector(superSelector, root=content.document) {
-+  let frameIndex = superSelector.indexOf("||");
-+  if (frameIndex === -1) {
-+    return root.querySelector(superSelector);
-+  } else {
-+    let rootSelector = superSelector.substring(0, frameIndex).trim();
-+    let childSelector = superSelector.substring(frameIndex+2).trim();
-+    root = root.querySelector(rootSelector);
-+    if (!root || !root.contentWindow) {
-+      return null;
-+    }
-+
-+    return superQuerySelector(childSelector, root.contentWindow.document);
-+  }
-+}
+ function finishUp() {
+   gBrowser.removeCurrentTab();
+-  toolbox = doc = null;
++  toolbox = null;
+   finish();
+ }
 diff --git a/browser/devtools/framework/test/head.js b/browser/devtools/framework/test/head.js
 --- a/browser/devtools/framework/test/head.js
 +++ b/browser/devtools/framework/test/head.js
-@@ -60,8 +60,93 @@ function *openScratchpadWindow () {
+@@ -60,8 +60,52 @@ function *openScratchpadWindow () {
    win.Scratchpad.addObserver({
      onReady: function () {
        win.Scratchpad.removeObserver(this);
@@ -412,65 +364,3 @@ diff --git a/browser/devtools/framework/test/head.js b/browser/devtools/framewor
 +    return promise.resolve();
 +  }
 +}
-+
-+/**
-+ * Get information about a DOM element, identified by its selector.
-+ * @param {String} selector.
-+ * @return {Promise} a promise that resolves to the element's information.
-+ */
-+function getNodeInfo(selector) {
-+  return executeInContent("devtools:test:getDomElementInfo", {selector});
-+}
-+
-+function waitForSWMessage(selector) {
-+  return executeInContent("devtools:test:waitForSWMessage", {selector});
-+}
-+
-+/**
-+ * Takes a string `script` and evaluates it directly in the content
-+ * in potentially a different process.
-+ */
-+function evalInDebuggee (script) {
-+  let deferred = promise.defer();
-+
-+  let mm = gBrowser.selectedBrowser.messageManager;
-+  if (!mm) {
-+    throw new Error("`loadFrameScripts()` must be called when using MessageManager.");
-+  }
-+
-+  let id = generateUUID().toString();
-+  mm.sendAsyncMessage("devtools:test:eval", { script: script, id: id });
-+  mm.addMessageListener("devtools:test:eval:response", handler);
-+
-+  function handler ({ data }) {
-+    if (id !== data.id) {
-+      return;
-+    }
-+
-+    mm.removeMessageListener("devtools:test:eval:response", handler);
-+    deferred.resolve(data.value);
-+  }
-+
-+  return deferred.promise;
-+}
-diff --git a/browser/devtools/framework/test/shared-head.js b/browser/devtools/framework/test/shared-head.js
---- a/browser/devtools/framework/test/shared-head.js
-+++ b/browser/devtools/framework/test/shared-head.js
-@@ -3,16 +3,17 @@
-  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
- // This shared-head.js file is used for multiple directories in devtools.
- const {console} = Cu.import("resource://gre/modules/devtools/Console.jsm", {});
- const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
- const {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
- const {ScratchpadManager} = Cu.import("resource:///modules/devtools/scratchpad-manager.jsm", {});
- const {TargetFactory} = devtools;
-+const {generateUUID } = Cc['@mozilla.org/uuid-generator;1'].getService(Ci.nsIUUIDGenerator);
- 
- const TEST_DIR = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
- const CHROME_URL_ROOT = TEST_DIR + "/";
- const URL_ROOT = CHROME_URL_ROOT.replace("chrome://mochitests/content/", "http://example.com/");
- 
- // All test are asynchronous
- waitForExplicitFinish();
- 
