@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  37d971d6f79ab21ed950a187e3b467195d0f85cd
+# Parent  2466098989080dc05fac6293674df7a28e79358e
 Bug 1153407 - browser_toolbox_options_enable_serviceworkers_testing.js breaks other tests, needs to be e10s. r=ochameau
 
 diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/framework/test/browser.ini
@@ -99,7 +99,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 -           value="Worker clicks here"/>
 -    <br>
 -    <div id="output">No output</div>
-+    <h1>Nothing to see here, move along</h1>
++    <h1>SW-test</h1>
    </body>
  </html>
 diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.js
@@ -191,7 +191,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 -
 -  return deferred.promise;
 +function register() {
-+  return executeInContent("devtools:test:register");
++  return executeInContent("devtools:sw-test:register");
  }
  
 -function testRegisterInstallingWorker() {
@@ -217,7 +217,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 -    });
 -  });
 +function unregister(swr) {
-+  return executeInContent("devtools:test:unregister");
++  return executeInContent("devtools:sw-test:unregister");
  }
  
 -// Workers should be turned back off when we closes the toolbox
@@ -293,7 +293,7 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 +    .then(testRegisterSuccesses)
 +    .then(unregister)
 +    // Workers should be turned back off when we closes the toolbox
-+    .then(toolbox.destroy)
++    .then(toolbox.destroy.bind(toolbox))
 +    .then(reload)
 +    .then(register)
 +    .then(testRegisterFails)
@@ -308,6 +308,35 @@ diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serv
 +  toolbox = null;
    finish();
  }
+diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_frame_script.js b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_frame_script.js
+new file mode 100644
+--- /dev/null
++++ b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing_frame_script.js
+@@ -0,0 +1,24 @@
++/* Any copyright is dedicated to the Public Domain.
++ http://creativecommons.org/publicdomain/zero/1.0/ */
++
++// A helper frame-script for browser/devtools/framework service worker tests.
++
++"use strict";
++
++addMessageListener("devtools:sw-test:register", function(msg) {
++  content.navigator.serviceWorker.register("serviceworker.js")
++    .then(swr => {
++      sendAsyncMessage("devtools:sw-test:register", {success: true});
++    }, error => {
++      sendAsyncMessage("devtools:sw-test:register", {success: false});
++    });
++});
++
++addMessageListener("devtools:sw-test:unregister", function(msg) {
++  content.navigator.serviceWorker.getRegistration().then(swr => {
++    swr.unregister().then(result => {
++      sendAsyncMessage("devtools:sw-test:unregister",
++                       {success: result ? true : false});
++    });
++  });
++});
 diff --git a/browser/devtools/framework/test/head.js b/browser/devtools/framework/test/head.js
 --- a/browser/devtools/framework/test/head.js
 +++ b/browser/devtools/framework/test/head.js
