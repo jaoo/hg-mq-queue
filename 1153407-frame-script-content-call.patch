@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  865f5477902ad579ef8cc3595f866ecc1c1e525b
+# Parent  59df398c2ce2644e2fde03a6d0c9597bc6df2304
 Bug 1153407 - browser_toolbox_options_enable_serviceworkers_testing.js breaks other tests, needs to be e10s. r=ochameau
 
 diff --git a/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html b/browser/devtools/framework/test/browser_toolbox_options_enable_serviceworkers_testing.html
