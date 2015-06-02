@@ -1,0 +1,91 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  ed1fbec79f7524c779f66b6ce30fe8e892be939b
+Bug 1160458 - Test
+
+diff --git a/dom/workers/test/serviceworkers/csp_worker.js b/dom/workers/test/serviceworkers/csp_worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/csp_worker.js
+@@ -0,0 +1,3 @@
++self.addEventListener('install', evt => {
++  eval('1+1');
++});
+diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
+--- a/dom/workers/test/serviceworkers/mochitest.ini
++++ b/dom/workers/test/serviceworkers/mochitest.ini
+@@ -101,16 +101,17 @@ support-files =
+   app-protocol/*
+   force_refresh_worker.js
+   sw_clients/refresher.html
+   sw_clients/refresher_compressed.html
+   sw_clients/refresher_compressed.html^headers^
+   sw_clients/refresher_cached.html
+   sw_clients/refresher_cached_compressed.html
+   sw_clients/refresher_cached_compressed.html^headers^
++  csp_worker.js
+ 
+ [test_unregister.html]
+ [test_installation_simple.html]
+ [test_fetch_event.html]
+ [test_https_fetch.html]
+ [test_https_fetch_cloned_response.html]
+ [test_https_synth_fetch_from_cached_sw.html]
+ [test_match_all.html]
+@@ -141,8 +142,9 @@ support-files =
+ [test_claim.html]
+ [test_periodic_https_update.html]
+ [test_sanitize.html]
+ [test_sanitize_domain.html]
+ [test_service_worker_allowed.html]
+ [test_app_protocol.html]
+ [test_claim_fetch.html]
+ [test_force_refresh.html]
++[test_csp.html]
+diff --git a/dom/workers/test/serviceworkers/test_csp.html b/dom/workers/test/serviceworkers/test_csp.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/test_csp.html
+@@ -0,0 +1,42 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1160458 - CSP activated by default in Service Workers</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++  function register() {
++    return navigator.serviceWorker.register("csp_worker.js");
++  }
++
++  function runTest() {
++    register()
++      .then(function() {
++        ok(true, "eval in service worker script didn't cause an issue");
++        SimpleTest.finish();
++      }).catch(function(e) {
++        ok(false, "Some test failed with error " + e);
++        SimpleTest.finish();
++      });
++  }
++
++  SimpleTest.waitForExplicitFinish();
++  SpecialPowers.pushPrefEnv({"set": [
++    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++    ["dom.messageChannel.enabled", true],
++    ["dom.serviceWorkers.enabled", true],
++    ["dom.serviceWorkers.testing.enabled", true]
++  ]}, runTest);
++</script>
++</pre>
++</body>
++</html>

@@ -1,0 +1,310 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  9eae3880b132898a96a80d497cba2b9523e049a4
+Bug 1160458 - Debug
+
+diff --git a/b2g/app/b2g.js b/b2g/app/b2g.js
+--- a/b2g/app/b2g.js
++++ b/b2g/app/b2g.js
+@@ -1127,14 +1127,21 @@ pref("dom.requestSync.enabled", true);
+ 
+ // Resample touch events on b2g
+ pref("gfx.touch.resample", true);
+ 
+ // Comma separated list of activity names that can only be provided by
+ // the system app in dev mode.
+ pref("dom.activities.developer_mode_only", "import-app");
+ 
+-// mulet apparently loads firefox.js as well as b2g.js, so we have to explicitly
+-// disable serviceworkers here to get them disabled in mulet.
+-pref("dom.serviceWorkers.enabled", false);
++// // mulet apparently loads firefox.js as well as b2g.js, so we have to explicitly
++// // disable serviceworkers here to get them disabled in mulet.
++// pref("dom.serviceWorkers.enabled", false);
+ 
+ // Retain at most 10 processes' layers buffers
+ pref("layers.compositor-lru-size", 10);
++
++pref('network.disable.ipc.security', true);
++pref('dom.caches.enabled', true);
++pref('dom.apps.developer_mode', true);
++pref('dom.webcomponents.enabled', true);
++pref("dom.serviceWorkers.enabled", true);
++pref("dom.serviceWorkers.testing.enabled", true);
+diff --git a/dom/security/nsCSPContext.cpp b/dom/security/nsCSPContext.cpp
+--- a/dom/security/nsCSPContext.cpp
++++ b/dom/security/nsCSPContext.cpp
+@@ -379,16 +379,19 @@ nsCSPContext::getAllowsInternal(nsConten
+     if (!(aContentType == nsIContentPolicy::TYPE_SCRIPT ||
+           aContentType == nsIContentPolicy::TYPE_STYLESHEET)) {
+       *outIsAllowed = false;
+       return NS_OK;
+     }
+   }
+ 
+   for (uint32_t i = 0; i < mPolicies.Length(); i++) {
++    nsAutoString polStr;
++    mPolicies[i]->toString(polStr);
++    printf_stderr("### ### nsCSPContext::getAllowsInternal() mPolicies[i] is %s\n", polStr.get());
+     if (!mPolicies[i]->allows(aContentType,
+                               aKeyword,
+                               aNonceOrContent)) {
+       // policy is violated: must report the violation and allow the inline
+       // script if the policy is report-only.
+       *outShouldReportViolation = true;
+       if (!mPolicies[i]->getReportOnlyFlag()) {
+         *outIsAllowed = false;
+diff --git a/dom/security/nsCSPParser.cpp b/dom/security/nsCSPParser.cpp
+--- a/dom/security/nsCSPParser.cpp
++++ b/dom/security/nsCSPParser.cpp
+@@ -1084,16 +1084,18 @@ nsCSPParser::parseContentSecurityPolicy(
+                  NS_ConvertUTF16toUTF8(aPolicyString).get()));
+     nsAutoCString spec;
+     aSelfURI->GetSpec(spec);
+     CSPPARSERLOG(("nsCSPParser::parseContentSecurityPolicy, selfURI: %s", spec.get()));
+     CSPPARSERLOG(("nsCSPParser::parseContentSecurityPolicy, reportOnly: %s",
+                  (aReportOnly ? "true" : "false")));
+   }
+ 
++  printf_stderr("### ### nsCSPParser::parseContentSecurityPolicy(), policy: %s",
++                 NS_ConvertUTF16toUTF8(aPolicyString).get());
+   NS_ASSERTION(aSelfURI, "Can not parseContentSecurityPolicy without aSelfURI");
+ 
+   // Separate all input into tokens and store them in the form of:
+   // [ [ name, src, src, ... ], [ name, src, src, ... ], ... ]
+   // The tokenizer itself can not fail; all eventual errors
+   // are detected in the parser itself.
+ 
+   nsTArray< nsTArray<nsString> > tokens;
+diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
+--- a/dom/workers/RuntimeService.cpp
++++ b/dom/workers/RuntimeService.cpp
+@@ -610,19 +610,19 @@ LoadJSGCMemoryOptions(const char* aPrefN
+     NS_WARNING(message.get());
+ #endif
+   }
+ }
+ 
+ void
+ ErrorReporter(JSContext* aCx, const char* aMessage, JSErrorReport* aReport)
+ {
++  printf_stderr("### #### ErrorReporter(%s)\n", aMessage);
+   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+   MOZ_ASSERT(worker);
+-
+   return worker->ReportError(aCx, aMessage, aReport);
+ }
+ 
+ bool
+ InterruptCallback(JSContext* aCx)
+ {
+   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+   MOZ_ASSERT(worker);
+@@ -675,32 +675,35 @@ private:
+ 
+ bool
+ ContentSecurityPolicyAllows(JSContext* aCx)
+ {
+   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+   worker->AssertIsOnWorkerThread();
+ 
+   if (worker->GetReportCSPViolations()) {
++    printf_stderr("### ### ContentSecurityPolicyAllows(), report CSP Violation\n");
+     nsString fileName;
+     uint32_t lineNum = 0;
+ 
+     JS::AutoFilename file;
+     if (JS::DescribeScriptedCaller(aCx, &file, &lineNum) && file.get()) {
+       fileName = NS_ConvertUTF8toUTF16(file.get());
+     } else {
+       JS_ReportPendingException(aCx);
+     }
+ 
+     nsRefPtr<LogViolationDetailsRunnable> runnable =
+         new LogViolationDetailsRunnable(worker, fileName, lineNum);
+ 
+     if (!runnable->Dispatch(aCx)) {
+       JS_ReportPendingException(aCx);
+     }
++  } else {
++    printf_stderr("### ### ContentSecurityPolicyAllows(), do not report CSP Violation\n");
+   }
+ 
+   return worker->IsEvalAllowed();
+ }
+ 
+ void
+ CTypesActivityCallback(JSContext* aCx,
+                        js::CTypesActivityType aType)
+@@ -820,16 +823,17 @@ private:
+ 
+   WorkerThreadRuntimePrivate&
+   operator=(const WorkerThreadRuntimePrivate&) = delete;
+ };
+ 
+ JSContext*
+ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSRuntime* aRuntime)
+ {
++  printf_stderr("### ### CreateJSContextForWorker()\n");
+   aWorkerPrivate->AssertIsOnWorkerThread();
+   NS_ASSERTION(!aWorkerPrivate->GetJSContext(), "Already has a context!");
+ 
+   JSSettings settings;
+   aWorkerPrivate->CopyJSSettings(settings);
+ 
+   JS::RuntimeOptionsRef(aRuntime) = settings.runtimeOptions;
+ 
+diff --git a/dom/workers/WorkerPrivate.cpp b/dom/workers/WorkerPrivate.cpp
+--- a/dom/workers/WorkerPrivate.cpp
++++ b/dom/workers/WorkerPrivate.cpp
+@@ -2237,16 +2237,17 @@ WorkerLoadInfo::WorkerLoadInfo()
+   , mReportCSPViolations(false)
+   , mXHRParamsAllowed(false)
+   , mPrincipalIsSystem(false)
+   , mIsInPrivilegedApp(false)
+   , mIsInCertifiedApp(false)
+   , mIndexedDBAllowed(false)
+ {
+   MOZ_COUNT_CTOR(WorkerLoadInfo);
++  printf_stderr("### ### WorkerLoadInfo() ctor, mEvalAllowed false, mReportCSPViolations false\n");
+ }
+ 
+ WorkerLoadInfo::~WorkerLoadInfo()
+ {
+   MOZ_COUNT_DTOR(WorkerLoadInfo);
+ }
+ 
+ void
+@@ -2289,16 +2290,17 @@ WorkerLoadInfo::StealFrom(WorkerLoadInfo
+   mFromWindow = aOther.mFromWindow;
+   mEvalAllowed = aOther.mEvalAllowed;
+   mReportCSPViolations = aOther.mReportCSPViolations;
+   mXHRParamsAllowed = aOther.mXHRParamsAllowed;
+   mPrincipalIsSystem = aOther.mPrincipalIsSystem;
+   mIsInPrivilegedApp = aOther.mIsInPrivilegedApp;
+   mIsInCertifiedApp = aOther.mIsInCertifiedApp;
+   mIndexedDBAllowed = aOther.mIndexedDBAllowed;
++  printf_stderr("### ### WorkerLoadInfo::StealFrom(), mEvalAllowed %s, mReportCSPViolations %s\n", mEvalAllowed ? "true" : "false", mReportCSPViolations ? "true" : "false");
+ }
+ 
+ template <class Derived>
+ class WorkerPrivateParent<Derived>::EventTarget final
+   : public nsIEventTarget
+ {
+   // This mutex protects mWorkerPrivate and must be acquired *before* the
+   // WorkerPrivate's mutex whenever they must both be held.
+@@ -4807,16 +4809,17 @@ WorkerPrivate::GetLoadInfo(JSContext* aC
+   if (aWindow) {
+     AssertIsOnMainThread();
+   }
+ 
+   WorkerLoadInfo loadInfo;
+   nsresult rv;
+ 
+   if (aParent) {
++    printf_stderr("### ### WorkerPrivate::GetLoadInfo(), aParent true\n");
+     aParent->AssertIsOnWorkerThread();
+ 
+     // If the parent is going away give up now.
+     Status parentStatus;
+     {
+       MutexAutoLock lock(aParent->mMutex);
+       parentStatus = aParent->mStatus;
+     }
+@@ -4849,16 +4852,17 @@ WorkerPrivate::GetLoadInfo(JSContext* aC
+       return NS_ERROR_FAILURE;
+     }
+ 
+     loadInfo.mDomain = aParent->Domain();
+     loadInfo.mFromWindow = aParent->IsFromWindow();
+     loadInfo.mWindowID = aParent->WindowID();
+     loadInfo.mIndexedDBAllowed = aParent->IsIndexedDBAllowed();
+   } else {
++    printf_stderr("### ### WorkerPrivate::GetLoadInfo(), aParent false\n");
+     AssertIsOnMainThread();
+ 
+     nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
+     MOZ_ASSERT(ssm);
+ 
+     bool isChrome = nsContentUtils::IsCallerChrome();
+ 
+     // First check to make sure the caller has permission to make a privileged
+@@ -4884,16 +4888,17 @@ WorkerPrivate::GetLoadInfo(JSContext* aC
+         globalWindow = do_QueryInterface(scriptGlobal);
+         MOZ_ASSERT(globalWindow);
+       }
+     }
+ 
+     nsCOMPtr<nsIDocument> document;
+ 
+     if (globalWindow) {
++      printf_stderr("### ### WorkerPrivate::GetLoadInfo(), aParent false, globalWindow true\n");
+       // Only use the current inner window, and only use it if the caller can
+       // access it.
+       nsPIDOMWindow* outerWindow = globalWindow->GetOuterWindow();
+       if (outerWindow) {
+         loadInfo.mWindow = outerWindow->GetCurrentInnerWindow();
+       }
+ 
+       if (!loadInfo.mWindow ||
+@@ -4965,16 +4970,17 @@ WorkerPrivate::GetLoadInfo(JSContext* aC
+       loadInfo.mIsInPrivilegedApp =
+         (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED ||
+          appStatus == nsIPrincipal::APP_STATUS_PRIVILEGED);
+       loadInfo.mIsInCertifiedApp = (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED);
+       loadInfo.mFromWindow = true;
+       loadInfo.mWindowID = globalWindow->WindowID();
+       loadInfo.mIndexedDBAllowed = IDBFactory::AllowedForWindow(globalWindow);
+     } else {
++      printf_stderr("### ### WorkerPrivate::GetLoadInfo(), aParent false, globalWindow false\n");
+       // Not a window
+       MOZ_ASSERT(isChrome);
+ 
+       // We're being created outside of a window. Need to figure out the script
+       // that is creating us in order for us to use relative URIs later on.
+       JS::AutoFilename fileName;
+       if (JS::DescribeScriptedCaller(aCx, &fileName)) {
+         // In most cases, fileName is URI. In a few other cases
+@@ -5019,19 +5025,21 @@ WorkerPrivate::GetLoadInfo(JSContext* aC
+       NS_WARNING("Failed to get CSP!");
+       return NS_ERROR_FAILURE;
+     }
+ 
+     if (loadInfo.mCSP) {
+       rv = loadInfo.mCSP->GetAllowsEval(&loadInfo.mReportCSPViolations,
+                                         &loadInfo.mEvalAllowed);
+       NS_ENSURE_SUCCESS(rv, rv);
++      printf_stderr("### ### WorkerPrivate::GetLoadInfo(), there is CSP, mEvalAllowed %s, mReportCSPViolations %s\n", loadInfo.mEvalAllowed ? "true" : "false", loadInfo.mReportCSPViolations ? "true" : "false");
+     } else {
+       loadInfo.mEvalAllowed = true;
+       loadInfo.mReportCSPViolations = false;
++      printf_stderr("### ### WorkerPrivate::GetLoadInfo(), there is no CSP, mEvalAllowed %s, mReportCSPViolations %s\n", loadInfo.mEvalAllowed ? "true" : "false", loadInfo.mReportCSPViolations ? "true" : "false");
+     }
+ 
+     if (!loadInfo.mLoadGroup || aLoadGroupBehavior == OverrideLoadGroup) {
+       OverrideLoadInfoLoadGroup(loadInfo);
+     }
+     MOZ_ASSERT(NS_LoadGroupMatchesPrincipal(loadInfo.mLoadGroup,
+                                             loadInfo.mPrincipal));
+ 
+diff --git a/dom/workers/WorkerPrivate.h b/dom/workers/WorkerPrivate.h
+--- a/dom/workers/WorkerPrivate.h
++++ b/dom/workers/WorkerPrivate.h
+@@ -655,16 +655,17 @@ public:
+   {
+     return mLoadInfo.mEvalAllowed;
+   }
+ 
+   void
+   SetEvalAllowed(bool aEvalAllowed)
+   {
+     mLoadInfo.mEvalAllowed = aEvalAllowed;
++    printf_stderr("### ### WorkerPrivateParent::SetEvalAllowed(), mEvalAllowed %s\n", aEvalAllowed ? "true" : "false");
+   }
+ 
+   bool
+   GetReportCSPViolations() const
+   {
+     return mLoadInfo.mReportCSPViolations;
+   }
+ 
