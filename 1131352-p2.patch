@@ -1,7 +1,7 @@
 # HG changeset patch
 # Parent 2f6ea66057fe37794d7fc061407495cdcece5443
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  f62f869dec1c83e5f1e46e539e22670f39ba86a8
+# Parent  86b13cadf701b0e382d9d5d52dc0694ed92b226a
 Bug 1131352 - Part 2: Add ServiceWorkerGlobalScope skipWaiting(). r=nsm,baku
 
 diff --git a/dom/webidl/ServiceWorkerGlobalScope.webidl b/dom/webidl/ServiceWorkerGlobalScope.webidl
@@ -30,7 +30,7 @@ diff --git a/dom/webidl/ServiceWorkerGlobalScope.webidl b/dom/webidl/ServiceWork
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -983,18 +983,21 @@ private:
+@@ -984,18 +984,21 @@ private:
        }
      }
  
@@ -54,7 +54,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
  NS_IMPL_ISUPPORTS_INHERITED0(ServiceWorkerRegisterJob, ServiceWorkerJob);
  
-@@ -1307,49 +1310,57 @@ LifecycleEventWorkerRunnable::DispatchLi
+@@ -1308,49 +1311,57 @@ LifecycleEventWorkerRunnable::DispatchLi
      new LifecycleEventPromiseHandler(mTask, mServiceWorker, false /* activateImmediately */);
    waitUntilPromise->AppendNativeHandler(handler);
    return true;
@@ -82,7 +82,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 +  if (!exitingWorker)
 +    return;
 +
-+  // FIXME(jaoo): Wait for exitingWorker to finish and terminate.
++  // FIXME(jaoo): Bug 1170543 - Wait for exitingWorker to finish and terminate it.
 +  exitingWorker->UpdateState(ServiceWorkerState::Redundant);
 +  nsresult rv = serviceWorkerScriptCache::PurgeCache(mPrincipal,
 +                                                     exitingWorker->CacheName());
@@ -127,7 +127,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
    // FIXME(nsm): Unlink appcache if there is one.
  
    swm->CheckPendingReadyPromises();
-@@ -3216,16 +3227,41 @@ ServiceWorkerManager::ClaimClients(const
+@@ -3227,16 +3238,41 @@ ServiceWorkerManager::ClaimClients(const
      return NS_ERROR_DOM_INVALID_STATE_ERR;
    }
  
@@ -378,7 +378,7 @@ diff --git a/dom/workers/WorkerScope.cpp b/dom/workers/WorkerScope.cpp
 +  MOZ_ASSERT(mWorkerPrivate->IsServiceWorker());
 +
 +  nsRefPtr<Promise> promise = Promise::Create(this, aRv);
-+  if (aRv.Failed()) {
++  if (NS_WARN_IF(aRv.Failed())) {
 +    return nullptr;
 +  }
 +
@@ -436,15 +436,15 @@ diff --git a/dom/workers/WorkerScope.h b/dom/workers/WorkerScope.h
 diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
 --- a/dom/workers/test/serviceworkers/mochitest.ini
 +++ b/dom/workers/test/serviceworkers/mochitest.ini
-@@ -92,16 +92,18 @@ support-files =
-   swa/worker_scope_too_deep.js^headers^
-   swa/worker_scope_too_narrow.js
-   swa/worker_scope_too_narrow.js^headers^
-   claim_oninstall_worker.js
-   claim_worker_1.js
-   claim_worker_2.js
-   claim_clients/client.html
-   claim_fetch_worker.js
+@@ -101,16 +101,18 @@ support-files =
+   app-protocol/*
+   force_refresh_worker.js
+   sw_clients/refresher.html
+   sw_clients/refresher_compressed.html
+   sw_clients/refresher_compressed.html^headers^
+   sw_clients/refresher_cached.html
+   sw_clients/refresher_cached_compressed.html
+   sw_clients/refresher_cached_compressed.html^headers^
 +  skip_waiting_installed_worker.js
 +  skip_waiting_scope/index.html
  
@@ -455,17 +455,16 @@ diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/se
  [test_https_fetch_cloned_response.html]
  [test_https_synth_fetch_from_cached_sw.html]
  [test_match_all.html]
-@@ -129,9 +131,10 @@ support-files =
- [test_empty_serviceworker.html]
- [test_periodic_update.html]
- [test_claim_oninstall.html]
+@@ -141,8 +143,9 @@ support-files =
  [test_claim.html]
  [test_periodic_https_update.html]
  [test_sanitize.html]
  [test_sanitize_domain.html]
  [test_service_worker_allowed.html]
-+[test_skip_waiting.html]
+ [test_app_protocol.html]
  [test_claim_fetch.html]
+ [test_force_refresh.html]
++[test_skip_waiting.html]
 diff --git a/dom/workers/test/serviceworkers/skip_waiting_installed_worker.js b/dom/workers/test/serviceworkers/skip_waiting_installed_worker.js
 new file mode 100644
 --- /dev/null

@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  d44425c6730c6824590c9e441479df03cda0772a
-Bug 1131352 - Part 1: Fix codegen issue. r=peterv
+# Parent  9eae3880b132898a96a80d497cba2b9523e049a4
+Bug 1131352 - Part 1: Fix codegen issue. r=smaug
 
 diff --git a/dom/bindings/Codegen.py b/dom/bindings/Codegen.py
 --- a/dom/bindings/Codegen.py
 +++ b/dom/bindings/Codegen.py
-@@ -11154,22 +11154,23 @@ class MemberProperties:
+@@ -11156,22 +11156,23 @@ class MemberProperties:
  def memberProperties(m, descriptor):
      props = MemberProperties()
      if m.isMethod():
