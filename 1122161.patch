@@ -1,9 +1,36 @@
 # HG changeset patch
 # Parent 50b95032152c1043d8dd7b8ffeb1051564466503
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
-# Parent  45a4d6336c7326d3f7541c62b98437fd0fcb4245
+# Parent  4207af385dd220e4d10089d8af93c4fa46dc316e
 Bug 1122161 - Redirected channels should respect skip service worker flag. r=nsm
 
+diff --git a/dom/tests/mochitest/fetch/mochitest.ini b/dom/tests/mochitest/fetch/mochitest.ini
+--- a/dom/tests/mochitest/fetch/mochitest.ini
++++ b/dom/tests/mochitest/fetch/mochitest.ini
+@@ -22,21 +22,21 @@ support-files =
+ skip-if = buildapp == 'b2g' # Bug 1137683
+ [test_headers_mainthread.html]
+ [test_fetch_app_protocol.html]
+ [test_fetch_basic.html]
+ [test_fetch_basic_sw_reroute.html]
+ skip-if = buildapp == 'b2g' # Bug 1137683
+ [test_fetch_basic_http.html]
+ [test_fetch_basic_http_sw_reroute.html]
+-skip-if = true # Bug 1122161, need proper support for redirects
++skip-if = true # Bug 1170937, need fully support for redirects
+ #skip-if = buildapp == 'b2g' # Bug 1137683
+ [test_fetch_cors.html]
+ [test_fetch_cors_sw_reroute.html]
+-skip-if = true # Bug 1122161, need proper support for redirects
++skip-if = true # Bug 1170937, need fully support for redirects
+ #skip-if = buildapp == 'b2g' # Bug 1137683
+ [test_formdataparsing.html]
+ [test_formdataparsing_sw_reroute.html]
+ skip-if = buildapp == 'b2g' # Bug 1137683
+ [test_request.html]
+ [test_request_sw_reroute.html]
+ skip-if = buildapp == 'b2g' # Bug 1137683
+ [test_response.html]
 diff --git a/dom/workers/test/serviceworkers/fetch/fetch_tests.js b/dom/workers/test/serviceworkers/fetch/fetch_tests.js
 --- a/dom/workers/test/serviceworkers/fetch/fetch_tests.js
 +++ b/dom/workers/test/serviceworkers/fetch/fetch_tests.js
@@ -26,7 +53,7 @@ diff --git a/dom/workers/test/serviceworkers/fetch/fetch_tests.js b/dom/workers/
 +});
 +
 +// Test fetch will internally get it's SkipServiceWorker flag set. The request is
-+// made from the SW through fecth(). Fetch() fetches a server-side JavaScript
++// made from the SW through fetch(). fetch() fetches a server-side JavaScript
 +// file that force a redirect. The redirect location fetch does not go through
 +// the SW.
 +fetchXHR('redirect_serviceworker.sjs', function(xhr) {
@@ -46,7 +73,7 @@ diff --git a/dom/workers/test/serviceworkers/fetch/fetch_tests.js b/dom/workers/
 diff --git a/dom/workers/test/serviceworkers/fetch_event_worker.js b/dom/workers/test/serviceworkers/fetch_event_worker.js
 --- a/dom/workers/test/serviceworkers/fetch_event_worker.js
 +++ b/dom/workers/test/serviceworkers/fetch_event_worker.js
-@@ -185,9 +185,29 @@ onfetch = function(ev) {
+@@ -185,9 +185,25 @@ onfetch = function(ev) {
      }
    }
  
@@ -58,15 +85,11 @@ diff --git a/dom/workers/test/serviceworkers/fetch_event_worker.js b/dom/workers
 -}
 +
 +  else if (ev.request.url.includes('something.txt')) {
-+    ev.respondWith(Promise.resolve(
-+      Response.redirect('fetch/somethingelse.txt')
-+    ));
++    ev.respondWith(Response.redirect('fetch/somethingelse.txt'));
 +  }
 +
 +  else if (ev.request.url.includes('somethingelse.txt')) {
-+    ev.respondWith(Promise.resolve(
-+      new Response('something else response body', {})
-+    ));
++    ev.respondWith(new Response('something else response body', {}));
 +  }
 +
 +  else if (ev.request.url.includes('redirect_serviceworker.sjs')) {
