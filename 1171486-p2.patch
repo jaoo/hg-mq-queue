@@ -1,0 +1,34 @@
+# HG changeset patch
+# User Ehsan Akhgari <ehsan@mozilla.com>
+
+Bug 1171486 - Part 2: Make it OK to call ServiceWorkerManager::GetInstance() during its Init() function; r=baku
+
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+index 563675f..4535cb3 100644
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -2290,22 +2290,23 @@ ServiceWorkerManager::GetOrCreateJobQueue(const nsACString& aKey,
+ /* static */
+ already_AddRefed<ServiceWorkerManager>
+ ServiceWorkerManager::GetInstance()
+ {
+   // Note: We don't simply check gInstance for null-ness here, since otherwise
+   // this can resurrect the ServiceWorkerManager pretty late during shutdown.
+   static bool firstTime = true;
+   if (firstTime) {
++    firstTime = false;
++
+     AssertIsOnMainThread();
+ 
+     gInstance = new ServiceWorkerManager();
+     gInstance->Init();
+     ClearOnShutdown(&gInstance);
+-    firstTime = false;
+   }
+   nsRefPtr<ServiceWorkerManager> copy = gInstance.get();
+   return copy.forget();
+ }
+ 
+ void
+ ServiceWorkerManager::FinishFetch(ServiceWorkerRegistrationInfo* aRegistration)
+ {
