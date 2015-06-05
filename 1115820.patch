@@ -1,13 +1,13 @@
 # HG changeset patch
 # Parent 8ea61086abd04f35e2e4e6f370fff9a170e72b00
 # User Jose Antonio Olivera Ortega <josea.olivera@gmail.com>
-# Parent  f986e55c4e0b41c6b50bd74d287614b564d7895f
-Bug 1115820 - Add telemetry to ServiceWorkers. r=nsm
+# Parent  5b4c240e1a36ed27db67f21dc35c1ca2e8934d0c
+Bug 1115820 - Add telemetry to ServiceWorkers. r=nsm,vladan
 
 diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
 --- a/dom/workers/RuntimeService.cpp
 +++ b/dom/workers/RuntimeService.cpp
-@@ -1685,16 +1685,22 @@ RuntimeService::UnregisterWorker(JSConte
+@@ -1662,16 +1662,22 @@ RuntimeService::UnregisterWorker(JSConte
      }
  
      if (!domainInfo->ActiveWorkerCount()) {
@@ -33,13 +33,13 @@ diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -21,16 +21,17 @@
- #include "nsPIDOMWindow.h"
+@@ -22,16 +22,17 @@
  #include "nsScriptLoader.h"
  #include "nsDebug.h"
  
  #include "jsapi.h"
  
+ #include "mozilla/BasePrincipal.h"
  #include "mozilla/ErrorNames.h"
  #include "mozilla/LoadContext.h"
 +#include "mozilla/Telemetry.h"
@@ -51,7 +51,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  #include "mozilla/dom/InternalHeaders.h"
  #include "mozilla/dom/Navigator.h"
  #include "mozilla/dom/PromiseNativeHandler.h"
-@@ -685,16 +686,19 @@ public:
+@@ -805,16 +806,19 @@ public:
      }
  
      if (aInCacheAndEqual) {
@@ -71,7 +71,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
        Fail(NS_ERROR_DOM_SECURITY_ERR);
        return;
      }
-@@ -1157,16 +1161,19 @@ ServiceWorkerManager::Register(nsIDOMWin
+@@ -1313,16 +1317,19 @@ ServiceWorkerManager::Register(nsIDOMWin
  
    nsRefPtr<ServiceWorkerResolveWindowPromiseOnUpdateCallback> cb =
      new ServiceWorkerResolveWindowPromiseOnUpdateCallback(window, promise);
@@ -91,7 +91,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  ServiceWorkerManager::AppendPendingOperation(ServiceWorkerJobQueue* aQueue,
                                               ServiceWorkerJob* aJob)
  {
-@@ -2368,16 +2375,17 @@ void
+@@ -2770,16 +2777,17 @@ void
  ServiceWorkerManager::StartControllingADocument(ServiceWorkerRegistrationInfo* aRegistration,
                                                  nsIDocument* aDoc)
  {
@@ -112,7 +112,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
 diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
 --- a/toolkit/components/telemetry/Histograms.json
 +++ b/toolkit/components/telemetry/Histograms.json
-@@ -7411,22 +7411,22 @@
+@@ -7488,22 +7488,22 @@
      "n_values": 3,
      "description": "Doorhanger shown = 0, Disable = 1, Enable = 2"
    },
@@ -137,7 +137,7 @@ diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/t
    },
    "LOOP_CLIENT_CALL_URL_SHARED": {
      "expires_in_version": "never",
-@@ -7925,27 +7925,49 @@
+@@ -8002,27 +8002,49 @@
      "kind": "exponential",
      "high": "60000",
      "n_buckets": 30,
