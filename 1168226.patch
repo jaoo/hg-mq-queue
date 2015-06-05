@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  2841a23f7fae514d0b5738cb27916dd2f1f0d06d
+# Parent  5b4c240e1a36ed27db67f21dc35c1ca2e8934d0c
 Bug 1168226 - ServiceWorkerRegistrar only use the scope when registering a service worker. r=baku
 
 diff --git a/b2g/app/b2g.js b/b2g/app/b2g.js
