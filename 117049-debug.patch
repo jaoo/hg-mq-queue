@@ -1,0 +1,128 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  d75a131a05e2aa7c0c40cb1c3792c6d883a8778d
+Bug 1170493 - Debug
+
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -361,19 +361,22 @@ ServiceWorkerManager::ServiceWorkerManag
+ {
+   // Register this component to PBackground.
+   MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
+ 
+   if (XRE_GetProcessType() == GeckoProcessType_Default) {
+     nsRefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
+     MOZ_ASSERT(swr);
+ 
++    printf_stderr("### ### ServiceWorkerManager::ServiceWorkerManager()\n");
+     nsTArray<ServiceWorkerRegistrationData> data;
+     swr->GetRegistrations(data);
++    printf_stderr("### ### ServiceWorkerManager::ServiceWorkerManager(), got registrations\n");
+     LoadRegistrations(data);
++    printf_stderr("### ### ServiceWorkerManager::ServiceWorkerManager(), loaded registrations\n");
+ 
+     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+     if (obs) {
+       DebugOnly<nsresult> rv;
+       rv = obs->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false /* ownsWeak */);
+       MOZ_ASSERT(NS_SUCCEEDED(rv));
+       rv = obs->AddObserver(this, PURGE_SESSION_HISTORY, false /* ownsWeak */);
+       MOZ_ASSERT(NS_SUCCEEDED(rv));
+diff --git a/dom/workers/ServiceWorkerRegistrar.cpp b/dom/workers/ServiceWorkerRegistrar.cpp
+--- a/dom/workers/ServiceWorkerRegistrar.cpp
++++ b/dom/workers/ServiceWorkerRegistrar.cpp
+@@ -94,16 +94,18 @@ ServiceWorkerRegistrar::~ServiceWorkerRe
+ 
+ void
+ ServiceWorkerRegistrar::GetRegistrations(
+                                nsTArray<ServiceWorkerRegistrationData>& aValues)
+ {
+   MOZ_ASSERT(NS_IsMainThread());
+   MOZ_ASSERT(aValues.IsEmpty());
+ 
++  printf_stderr("### ### ServiceWorkerRegistrar::GetRegistrations()\n");
++
+   // If we don't have the profile directory, profile is not started yet (and
+   // probably we are in a utest).
+   if (!mProfileDir) {
+     return;
+   }
+ 
+   // We care just about the first execution because this can be blocked by
+   // loading data from disk.
+@@ -220,16 +222,18 @@ ServiceWorkerRegistrar::UnregisterServic
+ }
+ 
+ void
+ ServiceWorkerRegistrar::LoadData()
+ {
+   MOZ_ASSERT(!NS_IsMainThread());
+   MOZ_ASSERT(!mDataLoaded);
+ 
++  printf_stderr("### ### ServiceWorkerRegistrar::LoadData()\n");
++
+   nsresult rv = ReadData();
+ 
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     DeleteData();
+     // Also if the reading failed we have to notify what is waiting for data.
+   }
+ 
+   MonitorAutoLock lock(mMonitor);
+@@ -241,16 +245,18 @@ ServiceWorkerRegistrar::LoadData()
+ nsresult
+ ServiceWorkerRegistrar::ReadData()
+ {
+   // We cannot assert about the correct thread because normally this method
+   // runs on a IO thread, but in gTests we call it from the main-thread.
+ 
+   MOZ_ASSERT(mProfileDir);
+ 
++  printf_stderr("### ### ServiceWorkerRegistrar::ReadData()\n");
++
+   nsCOMPtr<nsIFile> file;
+   nsresult rv = mProfileDir->Clone(getter_AddRefs(file));
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     return rv;
+   }
+ 
+   rv = file->Append(NS_LITERAL_STRING(SERVICEWORKERREGISTRAR_FILE));
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+@@ -590,16 +596,18 @@ ServiceWorkerRegistrar::WriteData()
+ }
+ 
+ void
+ ServiceWorkerRegistrar::ProfileStarted()
+ {
+   MOZ_ASSERT(NS_IsMainThread());
+   MOZ_ASSERT(!mProfileDir);
+ 
++  printf_stderr("### ### ServiceWorkerRegistrar::ProfileStarted()\n");
++
+   nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
+                                        getter_AddRefs(mProfileDir));
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     return;
+   }
+ 
+   nsCOMPtr<nsIEventTarget> target =
+     do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID);
+@@ -657,16 +665,17 @@ ServiceWorkerRegistrar::Shutdown()
+ 
+ NS_IMETHODIMP
+ ServiceWorkerRegistrar::Observe(nsISupports* aSubject, const char* aTopic,
+                                 const char16_t* aData)
+ {
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+   if (!strcmp(aTopic, "profile-after-change")) {
++    printf_stderr("### ### ServiceWorkerRegistrar::Observe(), profile-after-change\n");
+     nsCOMPtr<nsIObserverService> observerService =
+       services::GetObserverService();
+     observerService->RemoveObserver(this, "profile-after-change");
+ 
+     // The profile is fully loaded, now we can proceed with the loading of data
+     // from disk.
+     ProfileStarted();
+ 
