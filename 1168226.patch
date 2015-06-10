@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  490156f7447e7a6e4cf0ba0b980267ab2a7767ff
+# Parent  5787d784485edff3d792d4c08cf4e76821aaadfd
 Bug 1168226 - ServiceWorkerRegistrar only use the scope when registering a service worker. r=baku
 
 diff --git a/dom/workers/ServiceWorkerRegistrar.cpp b/dom/workers/ServiceWorkerRegistrar.cpp
 --- a/dom/workers/ServiceWorkerRegistrar.cpp
 +++ b/dom/workers/ServiceWorkerRegistrar.cpp
-@@ -144,22 +144,37 @@ ServiceWorkerRegistrar::RegisterServiceW
+@@ -144,22 +144,36 @@ ServiceWorkerRegistrar::RegisterServiceW
      NS_WARNING("Failed to register a serviceWorker during shutting down.");
      return;
    }
@@ -16,6 +16,11 @@ diff --git a/dom/workers/ServiceWorkerRegistrar.cpp b/dom/workers/ServiceWorkerR
      MOZ_ASSERT(mDataLoaded);
  
 +    const mozilla::ipc::PrincipalInfo& newPrincipalInfo = aData.principal();
++    MOZ_ASSERT(newPrincipalInfo.type() ==
++               mozilla::ipc::PrincipalInfo::TContentPrincipalInfo);
++
++    const mozilla::ipc::ContentPrincipalInfo& newContentPrincipalInfo =
++      newPrincipalInfo.get_ContentPrincipalInfo();
 +
      bool found = false;
      for (uint32_t i = 0, len = mData.Length(); i < len; ++i) {
@@ -25,12 +30,6 @@ diff --git a/dom/workers/ServiceWorkerRegistrar.cpp b/dom/workers/ServiceWorkerR
 -        break;
 +        const mozilla::ipc::PrincipalInfo& existingPrincipalInfo =
 +          mData[i].principal();
-+
-+        MOZ_ASSERT(newPrincipalInfo.type() ==
-+                   mozilla::ipc::PrincipalInfo::TContentPrincipalInfo);
-+
-+        const mozilla::ipc::ContentPrincipalInfo& newContentPrincipalInfo =
-+          newPrincipalInfo.get_ContentPrincipalInfo();
 +        const mozilla::ipc::ContentPrincipalInfo& existingContentPrincipalInfo =
 +          existingPrincipalInfo.get_ContentPrincipalInfo();
 +
