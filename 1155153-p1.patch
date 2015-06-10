@@ -1,0 +1,2878 @@
+# HG changeset patch
+# User Andrea Marchesini <amarchesini@mozilla.com>
+# Date 1433443917 -3600
+#      Thu Jun 04 19:51:57 2015 +0100
+# Node ID 3a1be3c951d8d1c86a265a5578a34f0e53ced3dd
+# Parent  4064fc7834989f7569261f346420ed07e9fec378
+Bug 1155153 - about:serviceworkers should work in e10s mode, r=nsm, r=bholley
+
+diff --git a/caps/BasePrincipal.cpp b/caps/BasePrincipal.cpp
+--- a/caps/BasePrincipal.cpp
++++ b/caps/BasePrincipal.cpp
+@@ -12,54 +12,119 @@
+ 
+ #include "nsPrincipal.h"
+ #include "nsNetUtil.h"
+ #include "nsNullPrincipal.h"
+ #include "nsScriptSecurityManager.h"
+ 
+ #include "mozilla/dom/CSPDictionariesBinding.h"
+ #include "mozilla/dom/ToJSValue.h"
++#include "mozilla/dom/URLSearchParams.h"
+ 
+ namespace mozilla {
+ 
++using dom::URLSearchParams;
++
+ void
+ OriginAttributes::CreateSuffix(nsACString& aStr) const
+ {
+-  aStr.Truncate();
+   MOZ_RELEASE_ASSERT(mAppId != nsIScriptSecurityManager::UNKNOWN_APP_ID);
+-  int attrCount = 0;
++
++  nsRefPtr<URLSearchParams> usp = new URLSearchParams();
++  nsAutoString value;
+ 
+   if (mAppId != nsIScriptSecurityManager::NO_APP_ID) {
+-    aStr.Append(attrCount++ ? "&appId=" : "!appId=");
+-    aStr.AppendInt(mAppId);
++    value.AppendInt(mAppId);
++    usp->Set(NS_LITERAL_STRING("appId"), value);
+   }
+ 
+   if (mInBrowser) {
+-    aStr.Append(attrCount++ ? "&inBrowser=1" : "!inBrowser=1");
++    usp->Set(NS_LITERAL_STRING("inBrowser"), NS_LITERAL_STRING("1"));
++  }
++
++  aStr.Truncate();
++
++  usp->Serialize(value);
++  if (!value.IsEmpty()) {
++    aStr.AppendLiteral("!");
++    aStr.Append(NS_ConvertUTF16toUTF8(value));
+   }
+ }
+ 
+-void
+-OriginAttributes::Serialize(nsIObjectOutputStream* aStream) const
++namespace {
++
++class MOZ_STACK_CLASS PopulateFromSuffixIterator final
++  : public URLSearchParams::ForEachIterator
+ {
+-  aStream->Write32(mAppId);
+-  aStream->WriteBoolean(mInBrowser);
++public:
++  explicit PopulateFromSuffixIterator(OriginAttributes* aOriginAttributes)
++    : mOriginAttributes(aOriginAttributes)
++  {
++    MOZ_ASSERT(aOriginAttributes);
++  }
++
++  bool URLSearchParamsIterator(const nsString& aName,
++                               const nsString& aValue) override
++  {
++    if (aName.EqualsLiteral("appId")) {
++      nsresult rv;
++      mOriginAttributes->mAppId = aValue.ToInteger(&rv);
++      if (NS_WARN_IF(NS_FAILED(rv))) {
++        return false;
++      }
++
++      if (mOriginAttributes->mAppId == nsIScriptSecurityManager::UNKNOWN_APP_ID) {
++        return false;
++      }
++
++      return true;
++    }
++
++    if (aName.EqualsLiteral("inBrowser")) {
++      if (!aValue.EqualsLiteral("1")) {
++        return false;
++      }
++
++      mOriginAttributes->mInBrowser = true;
++      return true;
++    }
++
++    // No other attributes are supported.
++    return false;
++  }
++
++private:
++  OriginAttributes* mOriginAttributes;
++};
++
++} // anonymous namespace
++
++bool
++OriginAttributes::PopulateFromSuffix(const nsACString& aStr)
++{
++  if (aStr.IsEmpty()) {
++    return true;
++  }
++
++  if (aStr[0] != '!') {
++    return false;
++  }
++
++  nsRefPtr<URLSearchParams> usp = new URLSearchParams();
++  usp->ParseInput(Substring(aStr, 1, aStr.Length() - 1), nullptr);
++
++  PopulateFromSuffixIterator iterator(this);
++  return usp->ForEach(iterator);
+ }
+ 
+-nsresult
+-OriginAttributes::Deserialize(nsIObjectInputStream* aStream)
+-{
+-  nsresult rv = aStream->Read32(&mAppId);
+-  NS_ENSURE_SUCCESS(rv, rv);
++BasePrincipal::BasePrincipal()
++{}
+ 
+-  rv = aStream->ReadBoolean(&mInBrowser);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+-  return NS_OK;
+-}
++BasePrincipal::~BasePrincipal()
++{}
+ 
+ NS_IMETHODIMP
+ BasePrincipal::GetOrigin(nsACString& aOrigin)
+ {
+   nsresult rv = GetOriginInternal(aOrigin);
+   NS_ENSURE_SUCCESS(rv, rv);
+   nsAutoCString suffix;
+   mOriginAttributes.CreateSuffix(suffix);
+diff --git a/caps/BasePrincipal.h b/caps/BasePrincipal.h
+--- a/caps/BasePrincipal.h
++++ b/caps/BasePrincipal.h
+@@ -8,16 +8,17 @@
+ #define mozilla_BasePrincipal_h
+ 
+ #include "nsIPrincipal.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsJSPrincipals.h"
+ 
+ #include "mozilla/dom/SystemDictionariesBinding.h"
+ 
++class nsIContentSecurityPolicy;
+ class nsIObjectOutputStream;
+ class nsIObjectInputStream;
+ 
+ namespace mozilla {
+ 
+ class OriginAttributes : public dom::OriginAttributesDictionary
+ {
+ public:
+@@ -33,36 +34,34 @@ public:
+     return mAppId == aOther.mAppId &&
+            mInBrowser == aOther.mInBrowser;
+   }
+   bool operator!=(const OriginAttributes& aOther) const
+   {
+     return !(*this == aOther);
+   }
+ 
+-  // Serializes non-default values into the suffix format, i.e.
++  // Serializes/Deserializes non-default values into the suffix format, i.e.
+   // |!key1=value1&key2=value2|. If there are no non-default attributes, this
+   // returns an empty string.
+   void CreateSuffix(nsACString& aStr) const;
+-
+-  void Serialize(nsIObjectOutputStream* aStream) const;
+-  nsresult Deserialize(nsIObjectInputStream* aStream);
++  bool PopulateFromSuffix(const nsACString& aStr);
+ };
+ 
+ /*
+  * Base class from which all nsIPrincipal implementations inherit. Use this for
+  * default implementations and other commonalities between principal
+  * implementations.
+  *
+  * We should merge nsJSPrincipals into this class at some point.
+  */
+ class BasePrincipal : public nsJSPrincipals
+ {
+ public:
+-  BasePrincipal() {}
++  BasePrincipal();
+ 
+   enum DocumentDomainConsideration { DontConsiderDocumentDomain, ConsiderDocumentDomain};
+   bool Subsumes(nsIPrincipal* aOther, DocumentDomainConsideration aConsideration);
+ 
+   NS_IMETHOD GetOrigin(nsACString& aOrigin) final;
+   NS_IMETHOD GetOriginNoSuffix(nsACString& aOrigin) final;
+   NS_IMETHOD Equals(nsIPrincipal* other, bool* _retval) final;
+   NS_IMETHOD EqualsConsideringDomain(nsIPrincipal* other, bool* _retval) final;
+@@ -88,17 +87,17 @@ public:
+   static BasePrincipal* Cast(nsIPrincipal* aPrin) { return static_cast<BasePrincipal*>(aPrin); }
+   static already_AddRefed<BasePrincipal> CreateCodebasePrincipal(nsIURI* aURI, OriginAttributes& aAttrs);
+ 
+   const OriginAttributes& OriginAttributesRef() { return mOriginAttributes; }
+   uint32_t AppId() const { return mOriginAttributes.mAppId; }
+   bool IsInBrowserElement() const { return mOriginAttributes.mInBrowser; }
+ 
+ protected:
+-  virtual ~BasePrincipal() {}
++  virtual ~BasePrincipal();
+ 
+   virtual nsresult GetOriginInternal(nsACString& aOrigin) = 0;
+   virtual bool SubsumesInternal(nsIPrincipal* aOther, DocumentDomainConsideration aConsider) = 0;
+ 
+   nsCOMPtr<nsIContentSecurityPolicy> mCSP;
+   OriginAttributes mOriginAttributes;
+ };
+ 
+diff --git a/caps/nsNullPrincipal.cpp b/caps/nsNullPrincipal.cpp
+--- a/caps/nsNullPrincipal.cpp
++++ b/caps/nsNullPrincipal.cpp
+@@ -77,17 +77,17 @@ nsNullPrincipal::GetScriptLocation(nsACS
+ 
+ NS_IMETHODIMP
+ nsNullPrincipal::GetHashValue(uint32_t *aResult)
+ {
+   *aResult = (NS_PTR_TO_INT32(this) >> 2);
+   return NS_OK;
+ }
+ 
+-NS_IMETHODIMP 
++NS_IMETHODIMP
+ nsNullPrincipal::GetURI(nsIURI** aURI)
+ {
+   return NS_EnsureSafeToReturn(mURI, aURI);
+ }
+ 
+ NS_IMETHODIMP
+ nsNullPrincipal::GetDomain(nsIURI** aDomain)
+ {
+@@ -155,18 +155,30 @@ nsNullPrincipal::GetBaseDomain(nsACStrin
+  */
+ NS_IMETHODIMP
+ nsNullPrincipal::Read(nsIObjectInputStream* aStream)
+ {
+   // Note - nsNullPrincipal use NS_GENERIC_FACTORY_CONSTRUCTOR_INIT, which means
+   // that the Init() method has already been invoked by the time we deserialize.
+   // This is in contrast to nsPrincipal, which uses NS_GENERIC_FACTORY_CONSTRUCTOR,
+   // in which case ::Read needs to invoke Init().
+-  return mOriginAttributes.Deserialize(aStream);
++  nsAutoCString suffix;
++  nsresult rv = aStream->ReadCString(suffix);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  bool ok = mOriginAttributes.PopulateFromSuffix(suffix);
++  NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
++
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsNullPrincipal::Write(nsIObjectOutputStream* aStream)
+ {
+-  OriginAttributesRef().Serialize(aStream);
++  nsAutoCString suffix;
++  OriginAttributesRef().CreateSuffix(suffix);
++
++  nsresult rv = aStream->WriteStringZ(suffix.get());
++  NS_ENSURE_SUCCESS(rv, rv);
++
+   return NS_OK;
+ }
+ 
+diff --git a/caps/nsNullPrincipal.h b/caps/nsNullPrincipal.h
+--- a/caps/nsNullPrincipal.h
++++ b/caps/nsNullPrincipal.h
+@@ -18,18 +18,18 @@
+ #include "nsCOMPtr.h"
+ #include "nsIContentSecurityPolicy.h"
+ 
+ #include "mozilla/BasePrincipal.h"
+ 
+ class nsIURI;
+ 
+ #define NS_NULLPRINCIPAL_CID \
+-{ 0xa0bd8b42, 0xf6bf, 0x4fb9, \
+-  { 0x93, 0x42, 0x90, 0xbf, 0xc9, 0xb7, 0xa1, 0xab } }
++{ 0xe502ffb8, 0x5d95, 0x48e8, \
++  { 0x82, 0x3c, 0x0d, 0x29, 0xd8, 0x3a, 0x59, 0x33 } }
+ #define NS_NULLPRINCIPAL_CONTRACTID "@mozilla.org/nullprincipal;1"
+ 
+ #define NS_NULLPRINCIPAL_SCHEME "moz-nullprincipal"
+ 
+ class nsNullPrincipal final : public mozilla::BasePrincipal
+ {
+ public:
+   // This should only be used by deserialization, and the factory constructor.
+diff --git a/caps/nsPrincipal.cpp b/caps/nsPrincipal.cpp
+--- a/caps/nsPrincipal.cpp
++++ b/caps/nsPrincipal.cpp
+@@ -355,19 +355,23 @@ nsPrincipal::Read(nsIObjectInputStream* 
+   nsCOMPtr<nsIURI> domain;
+   rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(supports));
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+   domain = do_QueryInterface(supports);
+ 
++  nsAutoCString suffix;
++  rv = aStream->ReadCString(suffix);
++  NS_ENSURE_SUCCESS(rv, rv);
++
+   OriginAttributes attrs;
+-  rv = attrs.Deserialize(aStream);
+-  NS_ENSURE_SUCCESS(rv, rv);
++  bool ok = attrs.PopulateFromSuffix(suffix);
++  NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
+ 
+   rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(supports));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // This may be null.
+   nsCOMPtr<nsIContentSecurityPolicy> csp = do_QueryInterface(supports, &rv);
+ 
+   rv = Init(codebase, attrs);
+@@ -399,17 +403,21 @@ nsPrincipal::Write(nsIObjectOutputStream
+   }
+ 
+   rv = NS_WriteOptionalCompoundObject(aStream, mDomain, NS_GET_IID(nsIURI),
+                                       true);
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+-  OriginAttributesRef().Serialize(aStream);
++  nsAutoCString suffix;
++  OriginAttributesRef().CreateSuffix(suffix);
++
++  rv = aStream->WriteStringZ(suffix.get());
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+   rv = NS_WriteOptionalCompoundObject(aStream, mCSP,
+                                       NS_GET_IID(nsIContentSecurityPolicy),
+                                       true);
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+diff --git a/caps/nsPrincipal.h b/caps/nsPrincipal.h
+--- a/caps/nsPrincipal.h
++++ b/caps/nsPrincipal.h
+@@ -107,17 +107,17 @@ protected:
+   bool SubsumesInternal(nsIPrincipal* aOther, DocumentDomainConsideration aConsideration) override;
+ 
+ private:
+   nsTArray< nsCOMPtr<nsIPrincipal> > mPrincipals;
+ };
+ 
+ #define NS_PRINCIPAL_CONTRACTID "@mozilla.org/principal;1"
+ #define NS_PRINCIPAL_CID \
+-  { 0x09b7e598, 0x490d, 0x423f, \
+-    { 0xa8, 0xa6, 0x2e, 0x6c, 0x4e, 0xc8, 0x77, 0x50 }}
++  { 0xb7c8505e, 0xc56d, 0x4191, \
++    { 0xa1, 0x5e, 0x5d, 0xcb, 0x88, 0x9b, 0xa0, 0x94 }}
+ 
+ #define NS_EXPANDEDPRINCIPAL_CONTRACTID "@mozilla.org/expandedprincipal;1"
+ #define NS_EXPANDEDPRINCIPAL_CID \
+-  { 0xb33a3807, 0xb76c, 0x44e5, \
+-    { 0xb9, 0x9d, 0x95, 0x7e, 0xe9, 0xba, 0x6e, 0x39 }}
++  { 0x38539471, 0x68cc, 0x4a6f, \
++    { 0x81, 0x20, 0xdb, 0xd5, 0x4a, 0x22, 0x0a, 0x13 }}
+ 
+ #endif // nsPrincipal_h__
+diff --git a/docshell/base/nsAboutRedirector.cpp b/docshell/base/nsAboutRedirector.cpp
+--- a/docshell/base/nsAboutRedirector.cpp
++++ b/docshell/base/nsAboutRedirector.cpp
+@@ -100,16 +100,17 @@ static RedirEntry kRedirMap[] = {
+     nsIAboutModule::ALLOW_SCRIPT
+   },
+   {
+     "webrtc", "chrome://global/content/aboutwebrtc/aboutWebrtc.xhtml",
+     nsIAboutModule::ALLOW_SCRIPT
+   },
+   {
+     "serviceworkers", "chrome://global/content/aboutServiceWorkers.xhtml",
++    nsIAboutModule::URI_CAN_LOAD_IN_CHILD |
+     nsIAboutModule::ALLOW_SCRIPT
+   },
+   // about:srcdoc is unresolvable by specification.  It is included here
+   // because the security manager would disallow srcdoc iframes otherwise.
+   {
+     "srcdoc", "about:blank",
+     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+       nsIAboutModule::HIDE_FROM_ABOUTABOUT
+diff --git a/dom/base/URLSearchParams.h b/dom/base/URLSearchParams.h
+--- a/dom/base/URLSearchParams.h
++++ b/dom/base/URLSearchParams.h
+@@ -22,16 +22,20 @@ class URLSearchParams;
+ class URLSearchParamsObserver : public nsISupports
+ {
+ public:
+   virtual ~URLSearchParamsObserver() {}
+ 
+   virtual void URLSearchParamsUpdated(URLSearchParams* aFromThis) = 0;
+ };
+ 
++// This class is used in BasePrincipal and it's _extremely_ important that the
++// attributes are kept in the correct order. If this changes, please, update
++// BasePrincipal code.
++
+ class URLSearchParams final : public nsISupports,
+                               public nsWrapperCache
+ {
+   ~URLSearchParams();
+ 
+ public:
+   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(URLSearchParams)
+@@ -76,25 +80,34 @@ public:
+ 
+   void Delete(const nsAString& aName);
+ 
+   void Stringify(nsString& aRetval) const
+   {
+     Serialize(aRetval);
+   }
+ 
+-  typedef void (*ParamFunc)(const nsString& aName, const nsString& aValue,
+-                            void* aClosure);
++  class ForEachIterator
++  {
++  public:
++    virtual bool
++    URLSearchParamsIterator(const nsString& aName, const nsString& aValue) = 0;
++  };
+ 
+-  void
+-  ForEach(ParamFunc aFunc, void* aClosure)
++  bool
++  ForEach(ForEachIterator& aIterator)
+   {
+     for (uint32_t i = 0; i < mSearchParams.Length(); ++i) {
+-      aFunc(mSearchParams[i].mKey, mSearchParams[i].mValue, aClosure);
++      if (!aIterator.URLSearchParamsIterator(mSearchParams[i].mKey,
++                                             mSearchParams[i].mValue)) {
++        return false;
++      }
+     }
++
++    return true;
+   }
+ 
+ private:
+   void AppendInternal(const nsAString& aName, const nsAString& aValue);
+ 
+   void DeleteAll();
+ 
+   void DecodeString(const nsACString& aInput, nsAString& aOutput);
+diff --git a/dom/fetch/Fetch.cpp b/dom/fetch/Fetch.cpp
+--- a/dom/fetch/Fetch.cpp
++++ b/dom/fetch/Fetch.cpp
+@@ -543,23 +543,36 @@ ExtractFromURLSearchParams(const URLSear
+                            nsCString& aContentType)
+ {
+   nsAutoString serialized;
+   aParams.Stringify(serialized);
+   aContentType = NS_LITERAL_CSTRING("application/x-www-form-urlencoded;charset=UTF-8");
+   return NS_NewStringInputStream(aStream, serialized);
+ }
+ 
+-void
+-FillFormData(const nsString& aName, const nsString& aValue, void* aFormData)
++class MOZ_STACK_CLASS FillFormIterator final
++  : public URLSearchParams::ForEachIterator
+ {
+-  MOZ_ASSERT(aFormData);
+-  nsFormData* fd = static_cast<nsFormData*>(aFormData);
+-  fd->Append(aName, aValue);
+-}
++public:
++  explicit FillFormIterator(nsFormData* aFormData)
++    : mFormData(aFormData)
++  {
++    MOZ_ASSERT(aFormData);
++  }
++
++  bool URLSearchParamsIterator(const nsString& aName,
++                               const nsString& aValue) override
++  {
++    mFormData->Append(aName, aValue);
++    return true;
++  }
++
++private:
++  nsFormData* mFormData;
++};
+ 
+ /**
+  * A simple multipart/form-data parser as defined in RFC 2388 and RFC 2046.
+  * This does not respect any encoding specified per entry, using UTF-8
+  * throughout. This is as the Fetch spec states in the consume body algorithm.
+  * Borrows some things from Necko's nsMultiMixedConv, but is simpler since
+  * unlike Necko we do not have to deal with receiving incomplete chunks of data.
+  *
+@@ -1586,17 +1599,20 @@ FetchBody<Derived>::ContinueConsumeBody(
+           isValidUrlEncodedMimeType = mMimeType[urlDataMimeType.Length()] == ';';
+         }
+ 
+         if (isValidUrlEncodedMimeType) {
+           nsRefPtr<URLSearchParams> params = new URLSearchParams();
+           params->ParseInput(data, /* aObserver */ nullptr);
+ 
+           nsRefPtr<nsFormData> fd = new nsFormData(DerivedClass()->GetParentObject());
+-          params->ForEach(FillFormData, static_cast<void*>(fd));
++          FillFormIterator iterator(fd);
++          DebugOnly<bool> status = params->ForEach(iterator);
++          MOZ_ASSERT(status);
++
+           localPromise->MaybeResolve(fd);
+         } else {
+           ErrorResult result;
+           result.ThrowTypeError(MSG_BAD_FORMDATA);
+           localPromise->MaybeReject(result);
+         }
+       }
+       return;
+diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
+--- a/dom/interfaces/base/nsIServiceWorkerManager.idl
++++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
+@@ -28,17 +28,17 @@ interface nsIServiceWorkerInfo : nsISupp
+   readonly attribute DOMString scope;
+   readonly attribute DOMString scriptSpec;
+   readonly attribute DOMString currentWorkerURL;
+ 
+   readonly attribute DOMString activeCacheName;
+   readonly attribute DOMString waitingCacheName;
+ };
+ 
+-[scriptable, builtinclass, uuid(d130fcbd-1afe-4dd9-b70d-08a4b2373af5)]
++[scriptable, builtinclass, uuid(5e112a42-df4c-4ae9-bc71-e6e681ab5f38)]
+ interface nsIServiceWorkerManager : nsISupports
+ {
+   /**
+    * Registers a ServiceWorker with script loaded from `aScriptURI` to act as
+    * the ServiceWorker for aScope.  Requires a valid entry settings object on
+    * the stack. This means you must call this from content code 'within'
+    * a window.
+    *
+@@ -92,23 +92,16 @@ interface nsIServiceWorkerManager : nsIS
+   [noscript] nsISupports GetActive(in nsIDOMWindow aWindow, in DOMString aScope);
+ 
+   /*
+    * Returns a ServiceWorker.
+    */
+   [noscript] nsISupports GetDocumentController(in nsIDOMWindow aWindow);
+ 
+   /*
+-   * This implements the soft update algorithm.
+-   * XXXbaku this can be removed when bug 1155153 lands.
+-   */
+-  [implicit_jscontext] void softUpdate(in jsval aOriginAttributes,
+-                                       in DOMString aScope);
+-
+-  /*
+    * Clears ServiceWorker registrations from memory and disk for the specified
+    * host.
+    * - All ServiceWorker instances change their state to redundant.
+    * - Existing ServiceWorker instances handling fetches will keep running.
+    * - All documents will immediately stop being controlled.
+    * - Unregister jobs will be queued for all registrations.
+    *   This eventually results in the registration being deleted from disk too.
+    */
+@@ -117,20 +110,32 @@ interface nsIServiceWorkerManager : nsIS
+   /*
+    * Clear all registrations for all hosts. See remove().
+    */
+   void removeAll();
+ 
+   // Testing
+   DOMString getScopeForUrl(in nsIPrincipal aPrincipal, in DOMString aPath);
+ 
+-  // This is meant to be used only by about:serviceworkers. It returns an array
+-  // of nsIServiceWorkerInfo.
++  // Note: This is meant to be used only by about:serviceworkers.
++  //It returns an array of nsIServiceWorkerInfo.
+   nsIArray getAllRegistrations();
+ 
++  // Note: This is meant to be used only by about:serviceworkers.
++  // It calls softUpdate() for each child process.
++  [implicit_jscontext] void propagateSoftUpdate(in jsval aOriginAttributes,
++                                                in DOMString aScope);
++
++  // Note: This is meant to be used only by about:serviceworkers.
++  // It calls unregister() in each child process. The callback is used to
++  // inform when unregister() is completed on the current process.
++  void propagateUnregister(in nsIPrincipal aPrincipal,
++                           in nsIServiceWorkerUnregisterCallback aCallback,
++                           in DOMString aScope);
++
+   [implicit_jscontext] void sendPushEvent(in jsval aOriginAttributes,
+                                           in ACString aScope,
+                                           in DOMString aData);
+   [implicit_jscontext] void sendPushSubscriptionChangeEvent(in jsval aOriginAttributes,
+                                                             in ACString scope);
+ 
+   void updateAllRegistrations();
+ };
+diff --git a/dom/workers/PServiceWorkerManager.ipdl b/dom/workers/PServiceWorkerManager.ipdl
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/PServiceWorkerManager.ipdl
+@@ -0,0 +1,39 @@
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++include protocol PBackground;
++
++include PBackgroundSharedTypes;
++include ServiceWorkerRegistrarTypes;
++
++using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
++
++namespace mozilla {
++namespace dom {
++
++protocol PServiceWorkerManager
++{
++  manager PBackground;
++
++parent:
++  Register(ServiceWorkerRegistrationData data);
++
++  Unregister(PrincipalInfo principalInfo, nsString scope);
++
++  PropagateSoftUpdate(OriginAttributes originAttributes,
++                      nsString scope);
++  PropagateUnregister(PrincipalInfo principalInfo, nsString scope);
++
++  Shutdown();
++
++child:
++  NotifyRegister(ServiceWorkerRegistrationData data);
++  NotifySoftUpdate(OriginAttributes originAttributes, nsString scope);
++  NotifyUnregister(PrincipalInfo principalInfo, nsString scope);
++
++  __delete__();
++};
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -49,16 +49,17 @@
+ #include "nsProxyRelease.h"
+ #include "nsQueryObject.h"
+ #include "nsTArray.h"
+ 
+ #include "RuntimeService.h"
+ #include "ServiceWorker.h"
+ #include "ServiceWorkerClient.h"
+ #include "ServiceWorkerContainer.h"
++#include "ServiceWorkerManagerChild.h"
+ #include "ServiceWorkerRegistrar.h"
+ #include "ServiceWorkerRegistration.h"
+ #include "ServiceWorkerScriptCache.h"
+ #include "ServiceWorkerEvents.h"
+ #include "WorkerInlines.h"
+ #include "WorkerPrivate.h"
+ #include "WorkerRunnable.h"
+ #include "WorkerScope.h"
+@@ -251,16 +252,38 @@ PopulateRegistrationData(nsIPrincipal* a
+ 
+   if (aRegistration->mWaitingWorker) {
+     aData.waitingCacheName() = aRegistration->mWaitingWorker->CacheName();
+   }
+ 
+   return NS_OK;
+ }
+ 
++class TeardownRunnable final : public nsRunnable
++{
++public:
++  explicit TeardownRunnable(ServiceWorkerManagerChild* aActor)
++    : mActor(aActor)
++  {
++    MOZ_ASSERT(mActor);
++  }
++
++  NS_IMETHODIMP Run() override
++  {
++    MOZ_ASSERT(mActor);
++    mActor->SendShutdown();
++    return NS_OK;
++  }
++
++private:
++  ~TeardownRunnable() {}
++
++  nsRefPtr<ServiceWorkerManagerChild> mActor;
++};
++
+ } // Anonymous namespace
+ 
+ NS_IMPL_ISUPPORTS0(ServiceWorkerJob)
+ NS_IMPL_ISUPPORTS0(ServiceWorkerRegistrationInfo)
+ 
+ void
+ ServiceWorkerJob::Done(nsresult aStatus)
+ {
+@@ -355,16 +378,24 @@ ServiceWorkerManager::ServiceWorkerManag
+   // Register this component to PBackground.
+   MOZ_ALWAYS_TRUE(BackgroundChild::GetOrCreateForCurrentThread(this));
+ }
+ 
+ ServiceWorkerManager::~ServiceWorkerManager()
+ {
+   // The map will assert if it is not empty when destroyed.
+   mRegistrationInfos.Clear();
++
++  if (mActor) {
++    mActor->ManagerShuttingDown();
++
++    nsRefPtr<TeardownRunnable> runnable = new TeardownRunnable(mActor);
++    nsresult rv = NS_DispatchToMainThread(runnable);
++    unused << NS_WARN_IF(NS_FAILED(rv));
++  }
+ }
+ 
+ void
+ ServiceWorkerManager::Init()
+ {
+   if (XRE_GetProcessType() == GeckoProcessType_Default) {
+     nsRefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
+     MOZ_ASSERT(swr);
+@@ -680,16 +711,82 @@ GetRequiredScopeStringPrefix(nsIURI* aSc
+     }
+ 
+     aPrefix.Append(path);
+   } else {
+     MOZ_ASSERT_UNREACHABLE("Invalid value for aPrefixMode");
+   }
+   return NS_OK;
+ }
++
++class PropagateSoftUpdateRunnable final : public nsRunnable
++{
++public:
++  PropagateSoftUpdateRunnable(const OriginAttributes& aOriginAttributes,
++                              const nsAString& aScope)
++    : mOriginAttributes(aOriginAttributes)
++    , mScope(aScope)
++  {}
++
++  NS_IMETHOD Run() override
++  {
++    MOZ_ASSERT(NS_IsMainThread());
++
++    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++    MOZ_ASSERT(swm);
++
++    swm->PropagateSoftUpdate(mOriginAttributes,mScope);
++    return NS_OK;
++  }
++
++private:
++  ~PropagateSoftUpdateRunnable()
++  {}
++
++  const OriginAttributes mOriginAttributes;
++  const nsString mScope;
++};
++
++class PropagateUnregisterRunnable final : public nsRunnable
++{
++public:
++  PropagateUnregisterRunnable(nsIPrincipal* aPrincipal,
++                              nsIServiceWorkerUnregisterCallback* aCallback,
++                              const nsAString& aScope)
++    : mPrincipal(aPrincipal)
++    , mCallback(aCallback)
++    , mScope(aScope)
++  {
++    MOZ_ASSERT(aPrincipal);
++  }
++
++  NS_IMETHOD Run() override
++  {
++    MOZ_ASSERT(NS_IsMainThread());
++
++    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++    MOZ_ASSERT(swm);
++
++    nsresult rv = swm->PropagateUnregister(mPrincipal, mCallback, mScope);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return rv;
++    }
++
++    return NS_OK;
++  }
++
++private:
++  ~PropagateUnregisterRunnable()
++  {}
++
++  nsCOMPtr<nsIPrincipal> mPrincipal;
++  nsCOMPtr<nsIServiceWorkerUnregisterCallback> mCallback;
++  const nsString mScope;
++};
++
+ } // anonymous namespace
+ 
+ class ServiceWorkerRegisterJob final : public ServiceWorkerJob,
+                                        public serviceWorkerScriptCache::CompareCallback
+ {
+   friend class ContinueInstallTask;
+ 
+   nsCString mScope;
+@@ -2202,18 +2299,17 @@ private:
+       }
+ 
+       // "Invoke [[Clear Registration]]..."
+       registration->Clear();
+       swm->RemoveRegistration(registration);
+     }
+ 
+     MOZ_ASSERT(swm->mActor);
+-    swm->mActor->SendUnregisterServiceWorker(principalInfo,
+-                                             NS_ConvertUTF8toUTF16(mScope));
++    swm->mActor->SendUnregister(principalInfo, NS_ConvertUTF8toUTF16(mScope));
+ 
+     return NS_OK;
+   }
+ 
+   // The unregister job is done irrespective of success or failure of any sort.
+   void
+   UnregisterAndDone()
+   {
+@@ -2427,54 +2523,75 @@ ServiceWorkerManager::CreateServiceWorke
+   nsRefPtr<ServiceWorker> serviceWorker =
+     new ServiceWorker(aWindow, aInfo, sharedWorker);
+ 
+   serviceWorker.forget(aServiceWorker);
+   return rv;
+ }
+ 
+ void
++ServiceWorkerManager::LoadRegistration(
++                             const ServiceWorkerRegistrationData& aRegistration)
++{
++  AssertIsOnMainThread();
++
++  nsCOMPtr<nsIPrincipal> principal =
++    PrincipalInfoToPrincipal(aRegistration.principal());
++  if (!principal) {
++    return;
++  }
++
++  nsRefPtr<ServiceWorkerRegistrationInfo> registration =
++    GetRegistration(principal, aRegistration.scope());
++  if (!registration) {
++    registration = CreateNewRegistration(aRegistration.scope(), principal);
++  } else if (registration->mScriptSpec == aRegistration.scriptSpec() &&
++             !!registration->mActiveWorker == aRegistration.currentWorkerURL().IsEmpty()) {
++    // No needs for updates.
++    return;
++  }
++
++  registration->mScriptSpec = aRegistration.scriptSpec();
++
++  const nsCString& currentWorkerURL = aRegistration.currentWorkerURL();
++  if (!currentWorkerURL.IsEmpty()) {
++    registration->mActiveWorker =
++      new ServiceWorkerInfo(registration, currentWorkerURL,
++                            aRegistration.activeCacheName());
++    registration->mActiveWorker->SetActivateStateUncheckedWithoutEvent(ServiceWorkerState::Activated);
++  }
++}
++
++void
+ ServiceWorkerManager::LoadRegistrations(
+                   const nsTArray<ServiceWorkerRegistrationData>& aRegistrations)
+ {
+   AssertIsOnMainThread();
+ 
+   for (uint32_t i = 0, len = aRegistrations.Length(); i < len; ++i) {
+-    nsCOMPtr<nsIPrincipal> principal =
+-      PrincipalInfoToPrincipal(aRegistrations[i].principal());
+-    if (!principal) {
+-      continue;
+-    }
+-
+-    ServiceWorkerRegistrationInfo* registration =
+-      CreateNewRegistration(aRegistrations[i].scope(), principal);
+-
+-    registration->mScriptSpec = aRegistrations[i].scriptSpec();
+-
+-    const nsCString& currentWorkerURL = aRegistrations[i].currentWorkerURL();
+-    if (!currentWorkerURL.IsEmpty()) {
+-      registration->mActiveWorker =
+-        new ServiceWorkerInfo(registration, currentWorkerURL, aRegistrations[i].activeCacheName());
+-      registration->mActiveWorker->SetActivateStateUncheckedWithoutEvent(ServiceWorkerState::Activated);
+-    }
++    LoadRegistration(aRegistrations[i]);
+   }
+ }
+ 
+ void
+ ServiceWorkerManager::ActorFailed()
+ {
+   MOZ_CRASH("Failed to create a PBackgroundChild actor!");
+ }
+ 
+ void
+ ServiceWorkerManager::ActorCreated(mozilla::ipc::PBackgroundChild* aActor)
+ {
+   MOZ_ASSERT(aActor);
+   MOZ_ASSERT(!mActor);
+-  mActor = aActor;
++
++  PServiceWorkerManagerChild* actor =
++    aActor->SendPServiceWorkerManagerConstructor();
++
++  mActor = static_cast<ServiceWorkerManagerChild*>(actor);
+ 
+   // Flush the pending requests.
+   for (uint32_t i = 0, len = mPendingOperations.Length(); i < len; ++i) {
+     MOZ_ASSERT(mPendingOperations[i].mRunnable ||
+                (mPendingOperations[i].mJob && mPendingOperations[i].mQueue));
+ 
+     if (mPendingOperations[i].mRunnable) {
+       nsresult rv = NS_DispatchToCurrentThread(mPendingOperations[i].mRunnable);
+@@ -2506,17 +2623,17 @@ ServiceWorkerManager::StoreRegistration(
+   }
+ 
+   PrincipalInfo principalInfo;
+   if (NS_WARN_IF(NS_FAILED(PrincipalToPrincipalInfo(aPrincipal,
+                                                     &principalInfo)))) {
+     return;
+   }
+ 
+-  mActor->SendRegisterServiceWorker(data);
++  mActor->SendRegister(data);
+ }
+ 
+ already_AddRefed<ServiceWorkerRegistrationInfo>
+ ServiceWorkerManager::GetServiceWorkerRegistrationInfo(nsPIDOMWindow* aWindow)
+ {
+   MOZ_ASSERT(aWindow);
+   nsCOMPtr<nsIDocument> document = aWindow->GetExtantDoc();
+   return GetServiceWorkerRegistrationInfo(document);
+@@ -3448,50 +3565,41 @@ ServiceWorkerManager::InvalidateServiceW
+     NS_ConvertUTF16toUTF8 utf8Scope(regScope);
+ 
+     if (utf8Scope.Equals(aRegistration->mScope)) {
+       target->InvalidateWorkers(aWhichOnes);
+     }
+   }
+ }
+ 
+-NS_IMETHODIMP
+-ServiceWorkerManager::SoftUpdate(JS::Handle<JS::Value> aOriginAttributes,
+-                                 const nsAString& aScope, JSContext* aCx)
+-{
+-  AssertIsOnMainThread();
+-
+-  OriginAttributes attrs;
+-  if (!aOriginAttributes.isObject() || !attrs.Init(aCx, aOriginAttributes)) {
+-    return NS_ERROR_INVALID_ARG;
+-  }
+-
+-  nsAutoCString scopeKey;
+-  attrs.CreateSuffix(scopeKey);
+-
+-  SoftUpdate(scopeKey, NS_ConvertUTF16toUTF8(aScope));
+-  return NS_OK;
+-}
+-
+ void
+ ServiceWorkerManager::SoftUpdate(nsIPrincipal* aPrincipal,
+                                  const nsACString& aScope)
+ {
+   MOZ_ASSERT(aPrincipal);
+ 
+   nsAutoCString scopeKey;
+   nsresult rv = PrincipalToScopeKey(aPrincipal, scopeKey);
+   if (NS_WARN_IF(NS_FAILED(rv))) {
+     return;
+   }
+ 
+   SoftUpdate(scopeKey, aScope);
+ }
+ 
+ void
++ServiceWorkerManager::SoftUpdate(const OriginAttributes& aOriginAttributes,
++                                 const nsACString& aScope)
++{
++  nsAutoCString scopeKey;
++  aOriginAttributes.CreateSuffix(scopeKey);
++  SoftUpdate(scopeKey, aScope);
++}
++
++void
+ ServiceWorkerManager::SoftUpdate(const nsACString& aScopeKey,
+                                  const nsACString& aScope)
+ {
+   nsRefPtr<ServiceWorkerRegistrationInfo> registration =
+     GetRegistration(aScopeKey, aScope);
+   if (NS_WARN_IF(!registration)) {
+     return;
+   }
+@@ -3770,16 +3878,20 @@ ServiceWorkerRegistrationInfo*
+ ServiceWorkerManager::CreateNewRegistration(const nsCString& aScope,
+                                             nsIPrincipal* aPrincipal)
+ {
+ #ifdef DEBUG
+   AssertIsOnMainThread();
+   nsCOMPtr<nsIURI> scopeURI;
+   nsresult rv = NS_NewURI(getter_AddRefs(scopeURI), aScope, nullptr, nullptr);
+   MOZ_ASSERT(NS_SUCCEEDED(rv));
++
++  nsRefPtr<ServiceWorkerRegistrationInfo> tmp =
++    GetRegistration(aPrincipal, aScope);
++  MOZ_ASSERT(!tmp);
+ #endif
+ 
+   ServiceWorkerRegistrationInfo* registration = new ServiceWorkerRegistrationInfo(aScope, aPrincipal);
+   // From now on ownership of registration is with
+   // mServiceWorkerRegistrationInfos.
+   AddScopeAndRegistration(aScope, registration);
+   return registration;
+ }
+@@ -3812,43 +3924,43 @@ ServiceWorkerManager::RemoveRegistration
+   if (NS_WARN_IF(NS_FAILED(PrincipalToPrincipalInfo(aRegistration->mPrincipal,
+                                                     &principalInfo)))) {
+     //XXXnsm I can't think of any other reason a stored principal would fail to
+     //convert.
+     NS_WARNING("Unable to unregister serviceworker due to possible OOM");
+     return;
+   }
+ 
+-  mActor->SendUnregisterServiceWorker(principalInfo,
+-                                      NS_ConvertUTF8toUTF16(aRegistration->mScope));
++  mActor->SendUnregister(principalInfo, NS_ConvertUTF8toUTF16(aRegistration->mScope));
+ }
+ 
+ class ServiceWorkerDataInfo final : public nsIServiceWorkerInfo
+ {
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSISERVICEWORKERINFO
+ 
+   static already_AddRefed<ServiceWorkerDataInfo>
+-  Create(const ServiceWorkerRegistrationData& aData);
++  Create(const ServiceWorkerRegistrationInfo* aData);
+ 
+ private:
+   ServiceWorkerDataInfo()
+   {}
+ 
+   ~ServiceWorkerDataInfo()
+   {}
+ 
+   nsCOMPtr<nsIPrincipal> mPrincipal;
+   nsString mScope;
+   nsString mScriptSpec;
+   nsString mCurrentWorkerURL;
+   nsString mActiveCacheName;
+   nsString mWaitingCacheName;
+ };
++
+ void
+ ServiceWorkerManager::RemoveRegistration(ServiceWorkerRegistrationInfo* aRegistration)
+ {
+   RemoveRegistrationInternal(aRegistration);
+   MOZ_ASSERT(HasScope(aRegistration->mPrincipal, aRegistration->mScope));
+   RemoveScopeAndRegistration(aRegistration);
+ }
+ 
+@@ -3946,36 +4058,71 @@ UnregisterIfMatchesHostPerPrincipal(cons
+                                     ServiceWorkerManager::RegistrationDataPerPrincipal* aData,
+                                     void* aUserData)
+ {
+   UnregisterIfMatchesHostData data(aData, aUserData);
+   aData->mInfos.EnumerateRead(UnregisterIfMatchesHost, &data);
+   return PL_DHASH_NEXT;
+ }
+ 
++PLDHashOperator
++GetAllRegistrationsEnumerator(const nsACString& aScope,
++                              ServiceWorkerRegistrationInfo* aReg,
++                              void* aData)
++{
++  nsIMutableArray* array = static_cast<nsIMutableArray*>(aData);
++  MOZ_ASSERT(aReg);
++
++  if (aReg->mPendingUninstall) {
++    return PL_DHASH_NEXT;
++  }
++
++  nsCOMPtr<nsIServiceWorkerInfo> info = ServiceWorkerDataInfo::Create(aReg);
++  if (NS_WARN_IF(!info)) {
++    return PL_DHASH_NEXT;
++  }
++
++  array->AppendElement(info, false);
++  return PL_DHASH_NEXT;
++}
++
++PLDHashOperator
++GetAllRegistrationsPerPrincipalEnumerator(const nsACString& aKey,
++                                          ServiceWorkerManager::RegistrationDataPerPrincipal* aData,
++                                          void* aUserData)
++{
++  aData->mInfos.EnumerateRead(GetAllRegistrationsEnumerator, aUserData);
++  return PL_DHASH_NEXT;
++}
++
+ } // anonymous namespace
++
+ NS_IMPL_ISUPPORTS(ServiceWorkerDataInfo, nsIServiceWorkerInfo)
+ 
+ /* static */ already_AddRefed<ServiceWorkerDataInfo>
+-ServiceWorkerDataInfo::Create(const ServiceWorkerRegistrationData& aData)
++ServiceWorkerDataInfo::Create(const ServiceWorkerRegistrationInfo* aData)
+ {
+   AssertIsOnMainThread();
++  MOZ_ASSERT(aData);
+ 
+   nsRefPtr<ServiceWorkerDataInfo> info = new ServiceWorkerDataInfo();
+ 
+-  info->mPrincipal = PrincipalInfoToPrincipal(aData.principal());
+-  if (!info->mPrincipal) {
+-    return nullptr;
++  info->mPrincipal = aData->mPrincipal;
++  CopyUTF8toUTF16(aData->mScope, info->mScope);
++  CopyUTF8toUTF16(aData->mScriptSpec, info->mScriptSpec);
++
++  if (aData->mActiveWorker) {
++    CopyUTF8toUTF16(aData->mActiveWorker->ScriptSpec(),
++                    info->mCurrentWorkerURL);
++    info->mActiveCacheName = aData->mActiveWorker->CacheName();
+   }
+ 
+-  CopyUTF8toUTF16(aData.scope(), info->mScope);
+-  CopyUTF8toUTF16(aData.scriptSpec(), info->mScriptSpec);
+-  CopyUTF8toUTF16(aData.currentWorkerURL(), info->mCurrentWorkerURL);
+-  info->mActiveCacheName = aData.activeCacheName();
+-  info->mWaitingCacheName = aData.waitingCacheName();
++  if (aData->mWaitingWorker) {
++    info->mWaitingCacheName = aData->mWaitingWorker->CacheName();
++  }
+ 
+   return info.forget();
+ }
+ 
+ NS_IMETHODIMP
+ ServiceWorkerDataInfo::GetPrincipal(nsIPrincipal** aPrincipal)
+ {
+   AssertIsOnMainThread();
+@@ -4023,36 +4170,22 @@ ServiceWorkerDataInfo::GetWaitingCacheNa
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ ServiceWorkerManager::GetAllRegistrations(nsIArray** aResult)
+ {
+   AssertIsOnMainThread();
+ 
+-  nsRefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
+-  MOZ_ASSERT(swr);
+-
+-  nsTArray<ServiceWorkerRegistrationData> data;
+-  swr->GetRegistrations(data);
+-
+   nsCOMPtr<nsIMutableArray> array(do_CreateInstance(NS_ARRAY_CONTRACTID));
+   if (!array) {
+     return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
+-  for (uint32_t i = 0, len = data.Length(); i < len; ++i) {
+-    nsCOMPtr<nsIServiceWorkerInfo> info = ServiceWorkerDataInfo::Create(data[i]);
+-    if (!info) {
+-      return NS_ERROR_FAILURE;
+-    }
+-
+-    array->AppendElement(info, false);
+-  }
+-
++  mRegistrationInfos.EnumerateRead(GetAllRegistrationsPerPrincipalEnumerator, array);
+   array.forget(aResult);
+   return NS_OK;
+ }
+ 
+ // MUST ONLY BE CALLED FROM UnregisterIfMatchesHost!
+ void
+ ServiceWorkerManager::ForceUnregister(RegistrationDataPerPrincipal* aRegistrationData,
+                                       ServiceWorkerRegistrationInfo* aRegistration)
+@@ -4148,16 +4281,79 @@ ServiceWorkerManager::Observe(nsISupport
+     }
+   } else {
+     MOZ_CRASH("Received message we aren't supposed to be registered for!");
+   }
+ 
+   return NS_OK;
+ }
+ 
++NS_IMETHODIMP
++ServiceWorkerManager::PropagateSoftUpdate(JS::Handle<JS::Value> aOriginAttributes,
++                                          const nsAString& aScope,
++                                          JSContext* aCx)
++{
++  MOZ_ASSERT(NS_IsMainThread());
++
++  OriginAttributes attrs;
++  if (!aOriginAttributes.isObject() || !attrs.Init(aCx, aOriginAttributes)) {
++    return NS_ERROR_INVALID_ARG;
++  }
++
++  PropagateSoftUpdate(attrs, aScope);
++  return NS_OK;
++}
++
++void
++ServiceWorkerManager::PropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
++                                          const nsAString& aScope)
++{
++  MOZ_ASSERT(NS_IsMainThread());
++
++  if (!mActor) {
++    nsRefPtr<nsIRunnable> runnable =
++      new PropagateSoftUpdateRunnable(aOriginAttributes, aScope);
++    AppendPendingOperation(runnable);
++    return;
++  }
++
++  mActor->SendPropagateSoftUpdate(aOriginAttributes, nsString(aScope));
++}
++
++NS_IMETHODIMP
++ServiceWorkerManager::PropagateUnregister(nsIPrincipal* aPrincipal,
++                                          nsIServiceWorkerUnregisterCallback* aCallback,
++                                          const nsAString& aScope)
++{
++  MOZ_ASSERT(NS_IsMainThread());
++  MOZ_ASSERT(aPrincipal);
++
++  if (!mActor) {
++    nsRefPtr<nsIRunnable> runnable =
++      new PropagateUnregisterRunnable(aPrincipal, aCallback, aScope);
++    AppendPendingOperation(runnable);
++    return NS_OK;
++  }
++
++  PrincipalInfo principalInfo;
++  if (NS_WARN_IF(NS_FAILED(PrincipalToPrincipalInfo(aPrincipal,
++                                                    &principalInfo)))) {
++    return NS_ERROR_FAILURE;
++  }
++
++  mActor->SendPropagateUnregister(principalInfo, nsString(aScope));
++
++  nsresult rv = Unregister(aPrincipal, aCallback, aScope);
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return rv;
++  }
++
++  return NS_OK;
++}
++
+ void
+ ServiceWorkerInfo::AppendWorker(ServiceWorker* aWorker)
+ {
+   MOZ_ASSERT(aWorker);
+ #ifdef DEBUG
+   nsAutoString workerURL;
+   aWorker->GetScriptURL(workerURL);
+   MOZ_ASSERT(workerURL.Equals(NS_ConvertUTF8toUTF16(mScriptSpec)));
+diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManager.h
+--- a/dom/workers/ServiceWorkerManager.h
++++ b/dom/workers/ServiceWorkerManager.h
+@@ -30,31 +30,28 @@
+ #include "nsRefPtrHashtable.h"
+ #include "nsTArrayForwardDeclare.h"
+ #include "nsTObserverArray.h"
+ 
+ namespace mozilla {
+ 
+ class OriginAttributes;
+ 
+-namespace ipc {
+-class BackgroundChild;
+-}
+-
+ namespace dom {
+ 
+ class ServiceWorkerRegistrationListener;
+ 
+ namespace workers {
+ 
+ class ServiceWorker;
+ class ServiceWorkerClientInfo;
+ class ServiceWorkerInfo;
+ class ServiceWorkerJob;
+ class ServiceWorkerJobQueue;
++class ServiceWorkerManagerChild;
+ 
+ // Needs to inherit from nsISupports because NS_ProxyRelease() does not support
+ // non-ISupports classes.
+ class ServiceWorkerRegistrationInfo final : public nsISupports
+ {
+   uint32_t mControlledDocumentsCounter;
+ 
+   virtual ~ServiceWorkerRegistrationInfo();
+@@ -299,16 +296,23 @@ public:
+                      nsIDocument* aDoc,
+                      nsIInterceptedChannel* aChannel,
+                      bool aIsReload,
+                      ErrorResult& aRv);
+ 
+   void
+   SoftUpdate(nsIPrincipal* aPrincipal, const nsACString& aScope);
+ 
++  void
++  SoftUpdate(const OriginAttributes& aOriginAttributes, const nsACString& aScope);
++
++  void
++  PropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
++                      const nsAString& aScope);
++
+   already_AddRefed<ServiceWorkerRegistrationInfo>
+   GetRegistration(nsIPrincipal* aPrincipal, const nsACString& aScope) const;
+ 
+   ServiceWorkerRegistrationInfo*
+   CreateNewRegistration(const nsCString& aScope, nsIPrincipal* aPrincipal);
+ 
+   void
+   RemoveRegistration(ServiceWorkerRegistrationInfo* aRegistration);
+@@ -347,16 +351,19 @@ public:
+ 
+   nsresult
+   SetSkipWaitingFlag(nsIPrincipal* aPrincipal, const nsCString& aScope,
+                      uint64_t aServiceWorkerID);
+ 
+   static already_AddRefed<ServiceWorkerManager>
+   GetInstance();
+ 
++ void
++ LoadRegistration(const ServiceWorkerRegistrationData& aRegistration);
++
+   void
+   LoadRegistrations(const nsTArray<ServiceWorkerRegistrationData>& aRegistrations);
+ 
+   // Used by remove() and removeAll() when clearing history.
+   // MUST ONLY BE CALLED FROM UnregisterIfMatchesHost!
+   void
+   ForceUnregister(RegistrationDataPerPrincipal* aRegistrationData,
+                   ServiceWorkerRegistrationInfo* aRegistration);
+@@ -520,17 +527,17 @@ private:
+   // Does all cleanup except removing the registration from
+   // mServiceWorkerRegistrationInfos. This is useful when we clear
+   // registrations via remove()/removeAll() since we are iterating over the
+   // hashtable and can cleanly remove within the hashtable enumeration
+   // function.
+   void
+   RemoveRegistrationInternal(ServiceWorkerRegistrationInfo* aRegistration);
+ 
+-  mozilla::ipc::PBackgroundChild* mActor;
++  nsRefPtr<ServiceWorkerManagerChild> mActor;
+ 
+   struct PendingOperation;
+   nsTArray<PendingOperation> mPendingOperations;
+ };
+ 
+ } // namespace workers
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/ServiceWorkerManagerChild.cpp
+@@ -0,0 +1,72 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "ServiceWorkerManagerChild.h"
++#include "ServiceWorkerManager.h"
++#include "mozilla/unused.h"
++
++namespace mozilla {
++
++using namespace ipc;
++
++namespace dom {
++namespace workers {
++
++bool
++ServiceWorkerManagerChild::RecvNotifyRegister(
++                                     const ServiceWorkerRegistrationData& aData)
++{
++  if (mShuttingDown) {
++    return true;
++  }
++
++  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++  MOZ_ASSERT(swm);
++
++  swm->LoadRegistration(aData);
++  return true;
++}
++
++bool
++ServiceWorkerManagerChild::RecvNotifySoftUpdate(
++                                      const OriginAttributes& aOriginAttributes,
++                                      const nsString& aScope)
++{
++  if (mShuttingDown) {
++    return true;
++  }
++
++  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++  MOZ_ASSERT(swm);
++
++  swm->SoftUpdate(aOriginAttributes, NS_ConvertUTF16toUTF8(aScope));
++  return true;
++}
++
++bool
++ServiceWorkerManagerChild::RecvNotifyUnregister(const PrincipalInfo& aPrincipalInfo,
++                                                const nsString& aScope)
++{
++  if (mShuttingDown) {
++    return true;
++  }
++
++  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
++  MOZ_ASSERT(swm);
++
++  nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(aPrincipalInfo);
++  if (NS_WARN_IF(!principal)) {
++    return true;
++  }
++
++  nsresult rv = swm->Unregister(principal, nullptr, aScope);
++  unused << NS_WARN_IF(NS_FAILED(rv));
++  return true;
++}
++
++} // workers namespace
++} // dom namespace
++} // mozilla namespace
+diff --git a/dom/workers/ServiceWorkerManagerChild.h b/dom/workers/ServiceWorkerManagerChild.h
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/ServiceWorkerManagerChild.h
+@@ -0,0 +1,59 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_ServiceWorkerManagerChild_h
++#define mozilla_dom_ServiceWorkerManagerChild_h
++
++#include "mozilla/dom/PServiceWorkerManagerChild.h"
++#include "mozilla/ipc/BackgroundUtils.h"
++
++namespace mozilla {
++
++class OriginAttributes;
++
++namespace ipc {
++class BackgroundChildImpl;
++}
++
++namespace dom {
++namespace workers {
++
++class ServiceWorkerManagerChild final : public PServiceWorkerManagerChild
++{
++  friend class mozilla::ipc::BackgroundChildImpl;
++
++public:
++  NS_INLINE_DECL_REFCOUNTING(ServiceWorkerManagerChild)
++
++  void ManagerShuttingDown()
++  {
++    mShuttingDown = true;
++  }
++
++  virtual bool RecvNotifyRegister(const ServiceWorkerRegistrationData& aData)
++                                                                       override;
++
++  virtual bool RecvNotifySoftUpdate(const OriginAttributes& aOriginAttributes,
++                                    const nsString& aScope) override;
++
++  virtual bool RecvNotifyUnregister(const PrincipalInfo& aPrincipalInfo,
++                                    const nsString& aScope) override;
++
++private:
++  ServiceWorkerManagerChild()
++    : mShuttingDown(false)
++  {}
++
++  ~ServiceWorkerManagerChild() {}
++
++  bool mShuttingDown;
++};
++
++} // workers namespace
++} // dom namespace
++} // mozilla namespace
++
++#endif // mozilla_dom_ServiceWorkerManagerChild_h
+diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWorkerManagerParent.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/ServiceWorkerManagerParent.cpp
+@@ -0,0 +1,289 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "ServiceWorkerManagerParent.h"
++#include "ServiceWorkerManagerService.h"
++#include "mozilla/AppProcessChecker.h"
++#include "mozilla/ipc/BackgroundParent.h"
++#include "mozilla/ipc/BackgroundUtils.h"
++#include "mozilla/unused.h"
++
++namespace mozilla {
++
++using namespace ipc;
++
++namespace dom {
++namespace workers {
++
++namespace {
++
++uint64_t sServiceWorkerManagerParentID = 0;
++
++void
++AssertIsInMainProcess()
++{
++  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
++}
++
++class RegisterServiceWorkerCallback final : public nsRunnable
++{
++public:
++  RegisterServiceWorkerCallback(const ServiceWorkerRegistrationData& aData,
++                                uint64_t aParentID)
++    : mData(aData)
++    , mParentID(aParentID)
++  {
++    AssertIsInMainProcess();
++    AssertIsOnBackgroundThread();
++  }
++
++  NS_IMETHODIMP
++  Run()
++  {
++    AssertIsInMainProcess();
++    AssertIsOnBackgroundThread();
++
++    nsRefPtr<dom::ServiceWorkerRegistrar> service =
++      dom::ServiceWorkerRegistrar::Get();
++    MOZ_ASSERT(service);
++
++    service->RegisterServiceWorker(mData);
++
++    nsRefPtr<ServiceWorkerManagerService> managerService =
++      ServiceWorkerManagerService::Get();
++    if (managerService) {
++      managerService->PropagateRegistration(mParentID, mData);
++    }
++
++    return NS_OK;
++  }
++
++private:
++  ServiceWorkerRegistrationData mData;
++  const uint64_t mParentID;
++};
++
++class UnregisterServiceWorkerCallback final : public nsRunnable
++{
++public:
++  UnregisterServiceWorkerCallback(const PrincipalInfo& aPrincipalInfo,
++                                  const nsString& aScope)
++    : mPrincipalInfo(aPrincipalInfo)
++    , mScope(aScope)
++  {
++    AssertIsInMainProcess();
++    AssertIsOnBackgroundThread();
++  }
++
++  NS_IMETHODIMP
++  Run()
++  {
++    AssertIsInMainProcess();
++    AssertIsOnBackgroundThread();
++
++    nsRefPtr<dom::ServiceWorkerRegistrar> service =
++      dom::ServiceWorkerRegistrar::Get();
++    MOZ_ASSERT(service);
++
++    service->UnregisterServiceWorker(mPrincipalInfo,
++                                     NS_ConvertUTF16toUTF8(mScope));
++    return NS_OK;
++  }
++
++private:
++  const PrincipalInfo mPrincipalInfo;
++  nsString mScope;
++};
++
++class CheckPrincipalWithCallbackRunnable final : public nsRunnable
++{
++public:
++  CheckPrincipalWithCallbackRunnable(already_AddRefed<ContentParent> aParent,
++                                     const PrincipalInfo& aPrincipalInfo,
++                                     nsRunnable* aCallback)
++    : mContentParent(aParent)
++    , mPrincipalInfo(aPrincipalInfo)
++    , mCallback(aCallback)
++    , mBackgroundThread(NS_GetCurrentThread())
++  {
++    AssertIsInMainProcess();
++    AssertIsOnBackgroundThread();
++
++    MOZ_ASSERT(mContentParent);
++    MOZ_ASSERT(mCallback);
++    MOZ_ASSERT(mBackgroundThread);
++  }
++
++  NS_IMETHODIMP Run()
++  {
++    if (NS_IsMainThread()) {
++      nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo);
++      AssertAppPrincipal(mContentParent, principal);
++      mContentParent = nullptr;
++
++      mBackgroundThread->Dispatch(this, NS_DISPATCH_NORMAL);
++      return NS_OK;
++    }
++
++    AssertIsOnBackgroundThread();
++    mCallback->Run();
++    mCallback = nullptr;
++
++    return NS_OK;
++  }
++
++private:
++  nsRefPtr<ContentParent> mContentParent;
++  PrincipalInfo mPrincipalInfo;
++  nsRefPtr<nsRunnable> mCallback;
++  nsCOMPtr<nsIThread> mBackgroundThread;
++};
++
++} // anonymous namespace
++
++ServiceWorkerManagerParent::ServiceWorkerManagerParent()
++  : mService(ServiceWorkerManagerService::GetOrCreate())
++  , mID(++sServiceWorkerManagerParentID)
++{
++  AssertIsOnBackgroundThread();
++  mService->RegisterActor(this);
++}
++
++ServiceWorkerManagerParent::~ServiceWorkerManagerParent()
++{
++  AssertIsOnBackgroundThread();
++}
++
++bool
++ServiceWorkerManagerParent::RecvRegister(
++                                     const ServiceWorkerRegistrationData& aData)
++{
++  AssertIsInMainProcess();
++  AssertIsOnBackgroundThread();
++
++  // Basic validation.
++  if (aData.scope().IsEmpty() ||
++      aData.scriptSpec().IsEmpty() ||
++      aData.principal().type() == PrincipalInfo::TNullPrincipalInfo ||
++      aData.principal().type() == PrincipalInfo::TSystemPrincipalInfo) {
++    return false;
++  }
++
++  nsRefPtr<RegisterServiceWorkerCallback> callback =
++    new RegisterServiceWorkerCallback(aData, mID);
++
++  nsRefPtr<ContentParent> parent =
++    BackgroundParent::GetContentParent(Manager());
++
++  // If the ContentParent is null we are dealing with a same-process actor.
++  if (!parent) {
++    callback->Run();
++    return true;
++  }
++
++  nsRefPtr<CheckPrincipalWithCallbackRunnable> runnable =
++    new CheckPrincipalWithCallbackRunnable(parent.forget(), aData.principal(),
++                                           callback);
++  nsresult rv = NS_DispatchToMainThread(runnable);
++  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
++
++  return true;
++}
++
++bool
++ServiceWorkerManagerParent::RecvUnregister(const PrincipalInfo& aPrincipalInfo,
++                                           const nsString& aScope)
++{
++  AssertIsInMainProcess();
++  AssertIsOnBackgroundThread();
++
++  // Basic validation.
++  if (aScope.IsEmpty() ||
++      aPrincipalInfo.type() == PrincipalInfo::TNullPrincipalInfo ||
++      aPrincipalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
++    return false;
++  }
++
++  nsRefPtr<UnregisterServiceWorkerCallback> callback =
++    new UnregisterServiceWorkerCallback(aPrincipalInfo, aScope);
++
++  nsRefPtr<ContentParent> parent =
++    BackgroundParent::GetContentParent(Manager());
++
++  // If the ContentParent is null we are dealing with a same-process actor.
++  if (!parent) {
++    callback->Run();
++    return true;
++  }
++
++  nsRefPtr<CheckPrincipalWithCallbackRunnable> runnable =
++    new CheckPrincipalWithCallbackRunnable(parent.forget(), aPrincipalInfo,
++                                           callback);
++  nsresult rv = NS_DispatchToMainThread(runnable);
++  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
++
++  return true;
++}
++
++bool
++ServiceWorkerManagerParent::RecvPropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
++                                                    const nsString& aScope)
++{
++  AssertIsOnBackgroundThread();
++
++  if (NS_WARN_IF(!mService)) {
++    return false;
++  }
++
++  mService->PropagateSoftUpdate(mID, aOriginAttributes, aScope);
++  return true;
++}
++
++bool
++ServiceWorkerManagerParent::RecvPropagateUnregister(const PrincipalInfo& aPrincipalInfo,
++                                                    const nsString& aScope)
++{
++  AssertIsOnBackgroundThread();
++
++  if (NS_WARN_IF(!mService)) {
++    return false;
++  }
++
++  mService->PropagateUnregister(mID, aPrincipalInfo, aScope);
++  return true;
++}
++
++bool
++ServiceWorkerManagerParent::RecvShutdown()
++{
++  AssertIsOnBackgroundThread();
++
++  if (NS_WARN_IF(!mService)) {
++    return false;
++  }
++
++  mService->UnregisterActor(this);
++  mService = nullptr;
++
++  unused << Send__delete__(this);
++  return true;
++}
++
++void
++ServiceWorkerManagerParent::ActorDestroy(ActorDestroyReason aWhy)
++{
++  AssertIsOnBackgroundThread();
++
++  if (mService) {
++    // This object is about to be released and with it, also mService will be
++    // released too.
++    mService->UnregisterActor(this);
++  }
++}
++
++} // workers namespace
++} // dom namespace
++} // mozilla namespace
+diff --git a/dom/workers/ServiceWorkerManagerParent.h b/dom/workers/ServiceWorkerManagerParent.h
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/ServiceWorkerManagerParent.h
+@@ -0,0 +1,66 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_ServiceWorkerManagerParent_h
++#define mozilla_dom_ServiceWorkerManagerParent_h
++
++#include "mozilla/dom/PServiceWorkerManagerParent.h"
++
++namespace mozilla {
++
++class OriginAttributes;
++
++namespace ipc {
++class BackgroundParentImpl;
++}
++
++namespace dom {
++namespace workers {
++
++class ServiceWorkerManagerService;
++
++class ServiceWorkerManagerParent final : public PServiceWorkerManagerParent
++{
++  friend class mozilla::ipc::BackgroundParentImpl;
++
++public:
++  uint64_t ID() const
++  {
++    return mID;
++  }
++
++private:
++  ServiceWorkerManagerParent();
++  ~ServiceWorkerManagerParent();
++
++  virtual bool RecvRegister(
++                           const ServiceWorkerRegistrationData& aData) override;
++
++  virtual bool RecvUnregister(const PrincipalInfo& aPrincipalInfo,
++                              const nsString& aScope) override;
++
++  virtual bool RecvPropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
++                                       const nsString& aScope) override;
++
++  virtual bool RecvPropagateUnregister(const PrincipalInfo& aPrincipalInfo,
++                                       const nsString& aScope) override;
++
++  virtual bool RecvShutdown() override;
++
++  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
++
++  nsRefPtr<ServiceWorkerManagerService> mService;
++
++  // We use this ID in the Service in order to avoid the sending of messages to
++  // ourself.
++  uint64_t mID;
++};
++
++} // workers namespace
++} // dom namespace
++} // mozilla namespace
++
++#endif // mozilla_dom_ServiceWorkerManagerParent_h
+diff --git a/dom/workers/ServiceWorkerManagerService.cpp b/dom/workers/ServiceWorkerManagerService.cpp
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/ServiceWorkerManagerService.cpp
+@@ -0,0 +1,290 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#include "ServiceWorkerManagerService.h"
++#include "ServiceWorkerManagerParent.h"
++#include "ServiceWorkerRegistrar.h"
++#include "mozilla/ipc/BackgroundParent.h"
++#include "mozilla/unused.h"
++
++namespace mozilla {
++
++using namespace ipc;
++
++namespace dom {
++namespace workers {
++
++namespace {
++
++ServiceWorkerManagerService* sInstance = nullptr;
++
++} // anonymous namespace
++
++ServiceWorkerManagerService::ServiceWorkerManagerService()
++{
++  AssertIsOnBackgroundThread();
++
++  // sInstance is a raw ServiceWorkerManagerService*.
++  MOZ_ASSERT(!sInstance);
++  sInstance = this;
++}
++
++ServiceWorkerManagerService::~ServiceWorkerManagerService()
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(sInstance == this);
++  MOZ_ASSERT(mAgents.Count() == 0);
++
++  sInstance = nullptr;
++}
++
++/* static */ already_AddRefed<ServiceWorkerManagerService>
++ServiceWorkerManagerService::Get()
++{
++  AssertIsOnBackgroundThread();
++
++  nsRefPtr<ServiceWorkerManagerService> instance = sInstance;
++  return instance.forget();
++}
++
++/* static */ already_AddRefed<ServiceWorkerManagerService>
++ServiceWorkerManagerService::GetOrCreate()
++{
++  AssertIsOnBackgroundThread();
++
++  nsRefPtr<ServiceWorkerManagerService> instance = sInstance;
++  if (!instance) {
++    instance = new ServiceWorkerManagerService();
++  }
++  return instance.forget();
++}
++
++void
++ServiceWorkerManagerService::RegisterActor(ServiceWorkerManagerParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(!mAgents.Contains(aParent));
++
++  mAgents.PutEntry(aParent);
++}
++
++void
++ServiceWorkerManagerService::UnregisterActor(ServiceWorkerManagerParent* aParent)
++{
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aParent);
++  MOZ_ASSERT(mAgents.Contains(aParent));
++
++  mAgents.RemoveEntry(aParent);
++}
++
++namespace {
++
++struct MOZ_STACK_CLASS RegistrationData final
++{
++  RegistrationData(ServiceWorkerRegistrationData& aData,
++                   uint64_t aParentID)
++    : mData(aData)
++    , mParentID(aParentID)
++#ifdef DEBUG
++    , mParentFound(false)
++#endif
++  {
++    MOZ_COUNT_CTOR(RegistrationData);
++  }
++
++  ~RegistrationData()
++  {
++    MOZ_COUNT_DTOR(RegistrationData);
++  }
++
++  const ServiceWorkerRegistrationData& mData;
++  const uint64_t mParentID;
++#ifdef DEBUG
++  bool mParentFound;
++#endif
++};
++
++PLDHashOperator
++RegistrationEnumerator(nsPtrHashKey<ServiceWorkerManagerParent>* aKey, void* aPtr)
++{
++  AssertIsOnBackgroundThread();
++
++  auto* data = static_cast<RegistrationData*>(aPtr);
++
++  ServiceWorkerManagerParent* parent = aKey->GetKey();
++  MOZ_ASSERT(parent);
++
++  if (parent->ID() != data->mParentID) {
++    unused << parent->SendNotifyRegister(data->mData);
++#ifdef DEBUG
++  } else {
++    data->mParentFound = true;
++#endif
++  }
++
++  return PL_DHASH_NEXT;
++}
++
++struct MOZ_STACK_CLASS SoftUpdateData final
++{
++  SoftUpdateData(const OriginAttributes& aOriginAttributes,
++                 const nsAString& aScope,
++                 uint64_t aParentID)
++    : mOriginAttributes(aOriginAttributes)
++    , mScope(aScope)
++    , mParentID(aParentID)
++#ifdef DEBUG
++    , mParentFound(false)
++#endif
++  {
++    MOZ_COUNT_CTOR(SoftUpdateData);
++  }
++
++  ~SoftUpdateData()
++  {
++    MOZ_COUNT_DTOR(SoftUpdateData);
++  }
++
++  const OriginAttributes& mOriginAttributes;
++  const nsString mScope;
++  const uint64_t mParentID;
++#ifdef DEBUG
++  bool mParentFound;
++#endif
++};
++
++PLDHashOperator
++SoftUpdateEnumerator(nsPtrHashKey<ServiceWorkerManagerParent>* aKey, void* aPtr)
++{
++  AssertIsOnBackgroundThread();
++
++  auto* data = static_cast<SoftUpdateData*>(aPtr);
++  ServiceWorkerManagerParent* parent = aKey->GetKey();
++  MOZ_ASSERT(parent);
++
++  if (parent->ID() != data->mParentID) {
++    unused <<parent->SendNotifySoftUpdate(data->mOriginAttributes,
++                                          data->mScope);
++#ifdef DEBUG
++  } else {
++    data->mParentFound = true;
++#endif
++  }
++
++  return PL_DHASH_NEXT;
++}
++
++struct MOZ_STACK_CLASS UnregisterData final
++{
++  UnregisterData(const PrincipalInfo& aPrincipalInfo,
++                 const nsAString& aScope,
++                 uint64_t aParentID)
++    : mPrincipalInfo(aPrincipalInfo)
++    , mScope(aScope)
++    , mParentID(aParentID)
++#ifdef DEBUG
++    , mParentFound(false)
++#endif
++  {
++    MOZ_COUNT_CTOR(UnregisterData);
++  }
++
++  ~UnregisterData()
++  {
++    MOZ_COUNT_DTOR(UnregisterData);
++  }
++
++  const PrincipalInfo mPrincipalInfo;
++  const nsString mScope;
++  const uint64_t mParentID;
++#ifdef DEBUG
++  bool mParentFound;
++#endif
++};
++
++PLDHashOperator
++UnregisterEnumerator(nsPtrHashKey<ServiceWorkerManagerParent>* aKey, void* aPtr)
++{
++  AssertIsOnBackgroundThread();
++
++  auto* data = static_cast<UnregisterData*>(aPtr);
++  ServiceWorkerManagerParent* parent = aKey->GetKey();
++  MOZ_ASSERT(parent);
++
++  if (parent->ID() != data->mParentID) {
++    unused << parent->SendNotifyUnregister(data->mPrincipalInfo, data->mScope);
++#ifdef DEBUG
++  } else {
++    data->mParentFound = true;
++#endif
++  }
++
++  return PL_DHASH_NEXT;
++}
++
++} // anonymous namespce
++
++void
++ServiceWorkerManagerService::PropagateRegistration(
++                                           uint64_t aParentID,
++                                           ServiceWorkerRegistrationData& aData)
++{
++  AssertIsOnBackgroundThread();
++
++  RegistrationData data(aData, aParentID);
++  mAgents.EnumerateEntries(RegistrationEnumerator, &data);
++
++#ifdef DEBUG
++  MOZ_ASSERT(data.mParentFound);
++#endif
++}
++
++void
++ServiceWorkerManagerService::PropagateSoftUpdate(
++                                      uint64_t aParentID,
++                                      const OriginAttributes& aOriginAttributes,
++                                      const nsAString& aScope)
++{
++  AssertIsOnBackgroundThread();
++
++  SoftUpdateData data(aOriginAttributes, aScope, aParentID);
++  mAgents.EnumerateEntries(SoftUpdateEnumerator, &data);
++
++#ifdef DEBUG
++  MOZ_ASSERT(data.mParentFound);
++#endif
++}
++
++void
++ServiceWorkerManagerService::PropagateUnregister(
++                                            uint64_t aParentID,
++                                            const PrincipalInfo& aPrincipalInfo,
++                                            const nsAString& aScope)
++{
++  AssertIsOnBackgroundThread();
++
++  nsRefPtr<dom::ServiceWorkerRegistrar> service =
++    dom::ServiceWorkerRegistrar::Get();
++  MOZ_ASSERT(service);
++
++  // It's possible that we don't have any ServiceWorkerManager managing this
++  // scope but we still need to unregister it from the ServiceWorkerRegistrar.
++  service->UnregisterServiceWorker(aPrincipalInfo,
++                                   NS_ConvertUTF16toUTF8(aScope));
++
++  UnregisterData data(aPrincipalInfo, aScope, aParentID);
++  mAgents.EnumerateEntries(UnregisterEnumerator, &data);
++
++#ifdef DEBUG
++  MOZ_ASSERT(data.mParentFound);
++#endif
++}
++
++} // workers namespace
++} // dom namespace
++} // mozilla namespace
+diff --git a/dom/workers/ServiceWorkerManagerService.h b/dom/workers/ServiceWorkerManagerService.h
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/ServiceWorkerManagerService.h
+@@ -0,0 +1,63 @@
++/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=8 sts=2 et sw=2 tw=80: */
++/* This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
++ * You can obtain one at http://mozilla.org/MPL/2.0/. */
++
++#ifndef mozilla_dom_ServiceWorkerManagerService_h
++#define mozilla_dom_ServiceWorkerManagerService_h
++
++#include "nsISupportsImpl.h"
++#include "nsHashKeys.h"
++#include "nsTHashtable.h"
++
++namespace mozilla {
++
++class OriginAttributes;
++
++namespace ipc {
++class PrincipalInfo;
++}
++
++namespace dom {
++
++class ServiceWorkerRegistrationData;
++
++namespace workers {
++
++class ServiceWorkerManagerParent;
++
++class ServiceWorkerManagerService final
++{
++public:
++  NS_INLINE_DECL_REFCOUNTING(ServiceWorkerManagerService)
++
++  static already_AddRefed<ServiceWorkerManagerService> Get();
++  static already_AddRefed<ServiceWorkerManagerService> GetOrCreate();
++
++  void RegisterActor(ServiceWorkerManagerParent* aParent);
++  void UnregisterActor(ServiceWorkerManagerParent* aParent);
++
++  void PropagateRegistration(uint64_t aParentID,
++                             ServiceWorkerRegistrationData& aData);
++
++  void PropagateSoftUpdate(uint64_t aParentID,
++                           const OriginAttributes& aOriginAttributes,
++                           const nsAString& aScope);
++
++  void PropagateUnregister(uint64_t aParentID,
++                           const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
++                           const nsAString& aScope);
++
++private:
++  ServiceWorkerManagerService();
++  ~ServiceWorkerManagerService();
++
++  nsTHashtable<nsPtrHashKey<ServiceWorkerManagerParent>> mAgents;
++};
++
++} // workers namespace
++} // dom namespace
++} // mozilla namespace
++
++#endif // mozilla_dom_ServiceWorkerManagerService_h
+diff --git a/dom/workers/moz.build b/dom/workers/moz.build
+--- a/dom/workers/moz.build
++++ b/dom/workers/moz.build
+@@ -64,16 +64,19 @@ UNIFIED_SOURCES += [
+     'RuntimeService.cpp',
+     'ScriptLoader.cpp',
+     'ServiceWorker.cpp',
+     'ServiceWorkerClient.cpp',
+     'ServiceWorkerClients.cpp',
+     'ServiceWorkerContainer.cpp',
+     'ServiceWorkerEvents.cpp',
+     'ServiceWorkerManager.cpp',
++    'ServiceWorkerManagerChild.cpp',
++    'ServiceWorkerManagerParent.cpp',
++    'ServiceWorkerManagerService.cpp',
+     'ServiceWorkerPeriodicUpdater.cpp',
+     'ServiceWorkerRegistrar.cpp',
+     'ServiceWorkerRegistration.cpp',
+     'ServiceWorkerScriptCache.cpp',
+     'ServiceWorkerWindowClient.cpp',
+     'SharedWorker.cpp',
+     'URL.cpp',
+     'WorkerDebuggerManager.cpp',
+@@ -81,16 +84,17 @@ UNIFIED_SOURCES += [
+     'WorkerRunnable.cpp',
+     'WorkerScope.cpp',
+     'WorkerThread.cpp',
+     'XMLHttpRequest.cpp',
+     'XMLHttpRequestUpload.cpp',
+ ]
+ 
+ IPDL_SOURCES += [
++    'PServiceWorkerManager.ipdl',
+     'ServiceWorkerRegistrarTypes.ipdlh',
+ ]
+ 
+ FAIL_ON_WARNINGS = True
+ 
+ LOCAL_INCLUDES += [
+     '../base',
+     '../system',
+diff --git a/ipc/glue/BackgroundChildImpl.cpp b/ipc/glue/BackgroundChildImpl.cpp
+--- a/ipc/glue/BackgroundChildImpl.cpp
++++ b/ipc/glue/BackgroundChildImpl.cpp
+@@ -1,16 +1,17 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "BackgroundChildImpl.h"
+ 
+ #include "ActorsChild.h" // IndexedDB
+ #include "BroadcastChannelChild.h"
++#include "ServiceWorkerManagerChild.h"
+ #include "FileDescriptorSetChild.h"
+ #include "mozilla/media/MediaChild.h"
+ #include "mozilla/Assertions.h"
+ #include "mozilla/dom/PBlobChild.h"
+ #include "mozilla/dom/cache/ActorUtils.h"
+ #include "mozilla/dom/indexedDB/PBackgroundIDBFactoryChild.h"
+ #include "mozilla/dom/ipc/BlobChild.h"
+ #include "mozilla/ipc/PBackgroundTestChild.h"
+@@ -256,16 +257,38 @@ BackgroundChildImpl::DeallocPBroadcastCh
+ {
+   nsRefPtr<dom::BroadcastChannelChild> child =
+     dont_AddRef(static_cast<dom::BroadcastChannelChild*>(aActor));
+   MOZ_ASSERT(child);
+   return true;
+ }
+ 
+ // -----------------------------------------------------------------------------
++// ServiceWorkerManager
++// -----------------------------------------------------------------------------
++
++dom::PServiceWorkerManagerChild*
++BackgroundChildImpl::AllocPServiceWorkerManagerChild()
++{
++  nsRefPtr<dom::workers::ServiceWorkerManagerChild> agent =
++    new dom::workers::ServiceWorkerManagerChild();
++  return agent.forget().take();
++}
++
++bool
++BackgroundChildImpl::DeallocPServiceWorkerManagerChild(
++                                             PServiceWorkerManagerChild* aActor)
++{
++  nsRefPtr<dom::workers::ServiceWorkerManagerChild> child =
++    dont_AddRef(static_cast<dom::workers::ServiceWorkerManagerChild*>(aActor));
++  MOZ_ASSERT(child);
++  return true;
++}
++
++// -----------------------------------------------------------------------------
+ // Cache API
+ // -----------------------------------------------------------------------------
+ 
+ PCacheStorageChild*
+ BackgroundChildImpl::AllocPCacheStorageChild(const Namespace& aNamespace,
+                                              const PrincipalInfo& aPrincipalInfo)
+ {
+   MOZ_CRASH("CacheStorageChild actor must be provided to PBackground manager");
+diff --git a/ipc/glue/BackgroundChildImpl.h b/ipc/glue/BackgroundChildImpl.h
+--- a/ipc/glue/BackgroundChildImpl.h
++++ b/ipc/glue/BackgroundChildImpl.h
+@@ -93,16 +93,22 @@ protected:
+   AllocPBroadcastChannelChild(const PrincipalInfo& aPrincipalInfo,
+                               const nsString& aOrigin,
+                               const nsString& aChannel,
+                               const bool& aPrivateBrowsing) override;
+ 
+   virtual bool
+   DeallocPBroadcastChannelChild(PBroadcastChannelChild* aActor) override;
+ 
++  virtual PServiceWorkerManagerChild*
++  AllocPServiceWorkerManagerChild() override;
++
++  virtual bool
++  DeallocPServiceWorkerManagerChild(PServiceWorkerManagerChild* aActor) override;
++
+   virtual dom::cache::PCacheStorageChild*
+   AllocPCacheStorageChild(const dom::cache::Namespace& aNamespace,
+                           const PrincipalInfo& aPrincipalInfo) override;
+ 
+   virtual bool
+   DeallocPCacheStorageChild(dom::cache::PCacheStorageChild* aActor) override;
+ 
+   virtual dom::cache::PCacheChild* AllocPCacheChild() override;
+diff --git a/ipc/glue/BackgroundParentImpl.cpp b/ipc/glue/BackgroundParentImpl.cpp
+--- a/ipc/glue/BackgroundParentImpl.cpp
++++ b/ipc/glue/BackgroundParentImpl.cpp
+@@ -22,16 +22,17 @@
+ #include "mozilla/layout/VsyncParent.h"
+ #include "mozilla/dom/network/UDPSocketParent.h"
+ #include "nsIAppsService.h"
+ #include "nsNetUtil.h"
+ #include "nsRefPtr.h"
+ #include "nsThreadUtils.h"
+ #include "nsTraceRefcnt.h"
+ #include "nsXULAppAPI.h"
++#include "ServiceWorkerManagerParent.h"
+ 
+ #ifdef DISABLE_ASSERTS_FOR_FUZZING
+ #define ASSERT_UNLESS_FUZZING(...) do { } while (0)
+ #else
+ #define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false)
+ #endif
+ 
+ using mozilla::ipc::AssertIsOnBackgroundThread;
+@@ -77,16 +78,17 @@ public:
+ } // anonymous namespace
+ 
+ namespace mozilla {
+ namespace ipc {
+ 
+ using mozilla::dom::ContentParent;
+ using mozilla::dom::BroadcastChannelParent;
+ using mozilla::dom::ServiceWorkerRegistrationData;
++using mozilla::dom::workers::ServiceWorkerManagerParent;
+ 
+ BackgroundParentImpl::BackgroundParentImpl()
+ {
+   AssertIsInMainProcess();
+   AssertIsOnMainThread();
+ 
+   MOZ_COUNT_CTOR(mozilla::ipc::BackgroundParentImpl);
+ }
+@@ -463,209 +465,49 @@ BackgroundParentImpl::DeallocPBroadcastC
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+   MOZ_ASSERT(aActor);
+ 
+   delete static_cast<BroadcastChannelParent*>(aActor);
+   return true;
+ }
+ 
++mozilla::dom::PServiceWorkerManagerParent*
++BackgroundParentImpl::AllocPServiceWorkerManagerParent()
++{
++  AssertIsInMainProcess();
++  AssertIsOnBackgroundThread();
++
++  return new ServiceWorkerManagerParent();
++}
++
++bool
++BackgroundParentImpl::DeallocPServiceWorkerManagerParent(
++                                            PServiceWorkerManagerParent* aActor)
++{
++  AssertIsInMainProcess();
++  AssertIsOnBackgroundThread();
++  MOZ_ASSERT(aActor);
++
++  delete static_cast<ServiceWorkerManagerParent*>(aActor);
++  return true;
++}
++
+ media::PMediaParent*
+ BackgroundParentImpl::AllocPMediaParent()
+ {
+   return media::AllocPMediaParent();
+ }
+ 
+ bool
+ BackgroundParentImpl::DeallocPMediaParent(media::PMediaParent *aActor)
+ {
+   return media::DeallocPMediaParent(aActor);
+ }
+ 
+-namespace {
+-
+-class RegisterServiceWorkerCallback final : public nsRunnable
+-{
+-public:
+-  explicit RegisterServiceWorkerCallback(
+-                                     const ServiceWorkerRegistrationData& aData)
+-    : mData(aData)
+-  {
+-    AssertIsInMainProcess();
+-    AssertIsOnBackgroundThread();
+-  }
+-
+-  NS_IMETHODIMP
+-  Run()
+-  {
+-    AssertIsInMainProcess();
+-    AssertIsOnBackgroundThread();
+-
+-    nsRefPtr<dom::ServiceWorkerRegistrar> service =
+-      dom::ServiceWorkerRegistrar::Get();
+-    MOZ_ASSERT(service);
+-
+-    service->RegisterServiceWorker(mData);
+-    return NS_OK;
+-  }
+-
+-private:
+-  ServiceWorkerRegistrationData mData;
+-};
+-
+-class UnregisterServiceWorkerCallback final : public nsRunnable
+-{
+-public:
+-  UnregisterServiceWorkerCallback(const PrincipalInfo& aPrincipalInfo,
+-                                  const nsString& aScope)
+-    : mPrincipalInfo(aPrincipalInfo)
+-    , mScope(aScope)
+-  {
+-    AssertIsInMainProcess();
+-    AssertIsOnBackgroundThread();
+-  }
+-
+-  NS_IMETHODIMP
+-  Run()
+-  {
+-    AssertIsInMainProcess();
+-    AssertIsOnBackgroundThread();
+-
+-    nsRefPtr<dom::ServiceWorkerRegistrar> service =
+-      dom::ServiceWorkerRegistrar::Get();
+-    MOZ_ASSERT(service);
+-
+-    service->UnregisterServiceWorker(mPrincipalInfo,
+-                                     NS_ConvertUTF16toUTF8(mScope));
+-    return NS_OK;
+-  }
+-
+-private:
+-  const PrincipalInfo mPrincipalInfo;
+-  nsString mScope;
+-};
+-
+-class CheckPrincipalWithCallbackRunnable final : public nsRunnable
+-{
+-public:
+-  CheckPrincipalWithCallbackRunnable(already_AddRefed<ContentParent> aParent,
+-                                     const PrincipalInfo& aPrincipalInfo,
+-                                     nsRunnable* aCallback)
+-    : mContentParent(aParent)
+-    , mPrincipalInfo(aPrincipalInfo)
+-    , mCallback(aCallback)
+-    , mBackgroundThread(NS_GetCurrentThread())
+-  {
+-    AssertIsInMainProcess();
+-    AssertIsOnBackgroundThread();
+-
+-    MOZ_ASSERT(mContentParent);
+-    MOZ_ASSERT(mCallback);
+-    MOZ_ASSERT(mBackgroundThread);
+-  }
+-
+-  NS_IMETHODIMP Run()
+-  {
+-    if (NS_IsMainThread()) {
+-      nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo);
+-      AssertAppPrincipal(mContentParent, principal);
+-      mContentParent = nullptr;
+-
+-      mBackgroundThread->Dispatch(this, NS_DISPATCH_NORMAL);
+-      return NS_OK;
+-    }
+-
+-    AssertIsOnBackgroundThread();
+-    if (mCallback) {
+-      mCallback->Run();
+-      mCallback = nullptr;
+-    }
+-
+-    return NS_OK;
+-  }
+-
+-private:
+-  nsRefPtr<ContentParent> mContentParent;
+-  PrincipalInfo mPrincipalInfo;
+-  nsRefPtr<nsRunnable> mCallback;
+-  nsCOMPtr<nsIThread> mBackgroundThread;
+-};
+-
+-} // anonymous namespace
+-
+-bool
+-BackgroundParentImpl::RecvRegisterServiceWorker(
+-                                     const ServiceWorkerRegistrationData& aData)
+-{
+-  AssertIsInMainProcess();
+-  AssertIsOnBackgroundThread();
+-
+-  // Basic validation.
+-  if (aData.scope().IsEmpty() ||
+-      aData.scriptSpec().IsEmpty() ||
+-      aData.principal().type() == PrincipalInfo::TNullPrincipalInfo ||
+-      aData.principal().type() == PrincipalInfo::TSystemPrincipalInfo) {
+-    return false;
+-  }
+-
+-  nsRefPtr<RegisterServiceWorkerCallback> callback =
+-    new RegisterServiceWorkerCallback(aData);
+-
+-  nsRefPtr<ContentParent> parent = BackgroundParent::GetContentParent(this);
+-
+-  // If the ContentParent is null we are dealing with a same-process actor.
+-  if (!parent) {
+-    callback->Run();
+-    return true;
+-  }
+-
+-  nsRefPtr<CheckPrincipalWithCallbackRunnable> runnable =
+-    new CheckPrincipalWithCallbackRunnable(parent.forget(), aData.principal(),
+-                                           callback);
+-  nsresult rv = NS_DispatchToMainThread(runnable);
+-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
+-
+-  return true;
+-}
+-
+-bool
+-BackgroundParentImpl::RecvUnregisterServiceWorker(
+-                                            const PrincipalInfo& aPrincipalInfo,
+-                                            const nsString& aScope)
+-{
+-  AssertIsInMainProcess();
+-  AssertIsOnBackgroundThread();
+-
+-  // Basic validation.
+-  if (aScope.IsEmpty() ||
+-      aPrincipalInfo.type() == PrincipalInfo::TNullPrincipalInfo ||
+-      aPrincipalInfo.type() == PrincipalInfo::TSystemPrincipalInfo) {
+-    return false;
+-  }
+-
+-  nsRefPtr<UnregisterServiceWorkerCallback> callback =
+-    new UnregisterServiceWorkerCallback(aPrincipalInfo, aScope);
+-
+-  nsRefPtr<ContentParent> parent = BackgroundParent::GetContentParent(this);
+-
+-  // If the ContentParent is null we are dealing with a same-process actor.
+-  if (!parent) {
+-    callback->Run();
+-    return true;
+-  }
+-
+-  nsRefPtr<CheckPrincipalWithCallbackRunnable> runnable =
+-    new CheckPrincipalWithCallbackRunnable(parent.forget(), aPrincipalInfo,
+-                                           callback);
+-  nsresult rv = NS_DispatchToMainThread(runnable);
+-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
+-
+-  return true;
+-}
+-
+ bool
+ BackgroundParentImpl::RecvShutdownServiceWorkerRegistrar()
+ {
+   AssertIsInMainProcess();
+   AssertIsOnBackgroundThread();
+ 
+   if (BackgroundParent::IsOtherProcessActor(this)) {
+     return false;
+diff --git a/ipc/glue/BackgroundParentImpl.h b/ipc/glue/BackgroundParentImpl.h
+--- a/ipc/glue/BackgroundParentImpl.h
++++ b/ipc/glue/BackgroundParentImpl.h
+@@ -81,31 +81,29 @@ protected:
+                                    const PrincipalInfo& aPrincipalInfo,
+                                    const nsString& origin,
+                                    const nsString& channel,
+                                    const bool& aPrivateBrowsing) override;
+ 
+   virtual bool
+   DeallocPBroadcastChannelParent(PBroadcastChannelParent* aActor) override;
+ 
++  virtual PServiceWorkerManagerParent*
++  AllocPServiceWorkerManagerParent() override;
++
++  virtual bool
++  DeallocPServiceWorkerManagerParent(PServiceWorkerManagerParent* aActor) override;
++
+   virtual PMediaParent*
+   AllocPMediaParent() override;
+ 
+   virtual bool
+   DeallocPMediaParent(PMediaParent* aActor) override;
+ 
+   virtual bool
+-  RecvRegisterServiceWorker(const ServiceWorkerRegistrationData& aData)
+-                            override;
+-
+-  virtual bool
+-  RecvUnregisterServiceWorker(const PrincipalInfo& aPrincipalInfo,
+-                              const nsString& aScope) override;
+-
+-  virtual bool
+   RecvShutdownServiceWorkerRegistrar() override;
+ 
+   virtual dom::cache::PCacheStorageParent*
+   AllocPCacheStorageParent(const dom::cache::Namespace& aNamespace,
+                            const PrincipalInfo& aPrincipalInfo) override;
+ 
+   virtual bool
+   DeallocPCacheStorageParent(dom::cache::PCacheStorageParent* aActor) override;
+diff --git a/ipc/glue/BackgroundUtils.h b/ipc/glue/BackgroundUtils.h
+--- a/ipc/glue/BackgroundUtils.h
++++ b/ipc/glue/BackgroundUtils.h
+@@ -1,21 +1,47 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef mozilla_ipc_backgroundutils_h__
+ #define mozilla_ipc_backgroundutils_h__
+ 
++#include "ipc/IPCMessageUtils.h"
+ #include "mozilla/Attributes.h"
++#include "mozilla/BasePrincipal.h"
+ #include "nsCOMPtr.h"
+ #include "nscore.h"
+ 
+ class nsIPrincipal;
+ 
++namespace IPC {
++
++template<>
++struct ParamTraits<mozilla::OriginAttributes>
++{
++  typedef mozilla::OriginAttributes paramType;
++
++  static void Write(Message* aMsg, const paramType& aParam)
++  {
++    nsAutoCString suffix;
++    aParam.CreateSuffix(suffix);
++    WriteParam(aMsg, suffix);
++  }
++
++  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
++  {
++    nsAutoCString suffix;
++    return ReadParam(aMsg, aIter, &suffix) &&
++           aResult->PopulateFromSuffix(suffix);
++  }
++};
++
++} // IPC namespace
++
+ namespace mozilla {
+ namespace ipc {
+ 
+ class PrincipalInfo;
+ 
+ /**
+  * Convert a PrincipalInfo to an nsIPrincipal.
+  *
+diff --git a/ipc/glue/PBackground.ipdl b/ipc/glue/PBackground.ipdl
+--- a/ipc/glue/PBackground.ipdl
++++ b/ipc/glue/PBackground.ipdl
+@@ -6,23 +6,23 @@ include protocol PBackgroundIDBFactory;
+ include protocol PBackgroundTest;
+ include protocol PBlob;
+ include protocol PBroadcastChannel;
+ include protocol PCache;
+ include protocol PCacheStorage;
+ include protocol PCacheStreamControl;
+ include protocol PFileDescriptorSet;
+ include protocol PMedia;
++include protocol PServiceWorkerManager;
+ include protocol PUDPSocket;
+ include protocol PVsync;
+ 
+ include DOMTypes;
+ include PBackgroundSharedTypes;
+ include PBackgroundIDBSharedTypes;
+-include ServiceWorkerRegistrarTypes;
+ 
+ using mozilla::dom::cache::Namespace from "mozilla/dom/cache/Types.h";
+ include "mozilla/dom/cache/IPCUtils.h";
+ 
+ namespace mozilla {
+ namespace ipc {
+ 
+ sync protocol PBackground
+@@ -31,35 +31,35 @@ sync protocol PBackground
+   manages PBackgroundTest;
+   manages PBlob;
+   manages PBroadcastChannel;
+   manages PCache;
+   manages PCacheStorage;
+   manages PCacheStreamControl;
+   manages PFileDescriptorSet;
+   manages PMedia;
++  manages PServiceWorkerManager;
+   manages PUDPSocket;
+   manages PVsync;
+ 
+ parent:
+   // Only called at startup during mochitests to check the basic infrastructure.
+   PBackgroundTest(nsCString testArg);
+ 
+   PBackgroundIDBFactory(LoggingInfo loggingInfo);
+ 
+   PVsync();
+   PMedia();
+ 
+   PUDPSocket(OptionalPrincipalInfo pInfo, nsCString filter);
+   PBroadcastChannel(PrincipalInfo pInfo, nsString origin, nsString channel,
+                     bool privateBrowsing);
+ 
+-  RegisterServiceWorker(ServiceWorkerRegistrationData data);
+-  UnregisterServiceWorker(PrincipalInfo principalInfo,
+-                          nsString scope);
++  PServiceWorkerManager();
++
+   ShutdownServiceWorkerRegistrar();
+ 
+   PCacheStorage(Namespace aNamespace, PrincipalInfo aPrincipalInfo);
+ 
+ child:
+   PCache();
+   PCacheStreamControl();
+ 
+diff --git a/ipc/glue/moz.build b/ipc/glue/moz.build
+--- a/ipc/glue/moz.build
++++ b/ipc/glue/moz.build
+@@ -128,16 +128,17 @@ SOURCES += [
+     'GeckoChildProcessHost.cpp',
+     'URIUtils.cpp',
+ ]
+ 
+ LOCAL_INCLUDES += [
+     '/caps',
+     '/dom/broadcastchannel',
+     '/dom/indexedDB',
++    '/dom/workers',
+     '/xpcom/build',
+ ]
+ 
+ IPDL_SOURCES = [
+     'InputStreamParams.ipdlh',
+     'PBackground.ipdl',
+     'PBackgroundSharedTypes.ipdlh',
+     'PBackgroundTest.ipdl',
+diff --git a/toolkit/content/aboutServiceWorkers.js b/toolkit/content/aboutServiceWorkers.js
+--- a/toolkit/content/aboutServiceWorkers.js
++++ b/toolkit/content/aboutServiceWorkers.js
+@@ -127,17 +127,17 @@ function display(info) {
+     error => {
+       dump("about:serviceworkers - push registration failed\n");
+     }
+   );
+ 
+   let updateButton = document.createElement("button");
+   updateButton.appendChild(document.createTextNode(bundle.GetStringFromName('update')));
+   updateButton.onclick = function() {
+-    gSWM.softUpdate(info.principal.originAttributes, info.scope);
++    gSWM.propagateSoftUpdate(info.principal.originAttributes, info.scope);
+   };
+   div.appendChild(updateButton);
+ 
+   let unregisterButton = document.createElement("button");
+   unregisterButton.appendChild(document.createTextNode(bundle.GetStringFromName('unregister')));
+   div.appendChild(unregisterButton);
+ 
+   let loadingMessage = document.createElement('span');
+@@ -159,17 +159,17 @@ function display(info) {
+       unregisterFailed: function() {
+         alert(bundle.GetStringFromName('unregisterError'));
+       },
+ 
+       QueryInterface: XPCOMUtils.generateQI([Ci.nsIServiceWorkerUnregisterCallback])
+     };
+ 
+     loadingMessage.classList.remove('inactive');
+-    gSWM.unregister(info.principal, cb, info.scope);
++    gSWM.propagateUnregister(info.principal, cb, info.scope);
+   };
+ 
+   let sep = document.createElement('hr');
+   div.appendChild(sep);
+ 
+   ++gSWCount;
+ }
+ 
