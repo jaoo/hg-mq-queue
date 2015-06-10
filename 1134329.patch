@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  7d4ab4a9febdf66c18d752afd4bd241c41be921f
+# Parent  5787d784485edff3d792d4c08cf4e76821aaadfd
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm,ochameau
 
 diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
@@ -52,7 +52,7 @@ diff --git a/browser/devtools/framework/test/browser.ini b/browser/devtools/fram
  [browser_keybindings_01.js]
  [browser_keybindings_02.js]
  [browser_new_activation_workflow.js]
-@@ -61,14 +61,14 @@ skip-if = e10s # Bug 1069044 - destroyIn
+@@ -62,14 +62,14 @@ skip-if = e10s # Bug 1069044 - destroyIn
  [browser_toolbox_view_source_04.js]
  [browser_toolbox_window_reload_target.js]
  [browser_toolbox_window_shortcuts.js]
@@ -312,7 +312,7 @@ diff --git a/browser/devtools/framework/toolbox-options.xul b/browser/devtools/f
 diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/toolbox.js
 --- a/browser/devtools/framework/toolbox.js
 +++ b/browser/devtools/framework/toolbox.js
-@@ -344,16 +344,17 @@ Toolbox.prototype = {
+@@ -351,16 +351,17 @@ Toolbox.prototype = {
        this.textboxContextMenuPopup.addEventListener("popupshowing",
          this._updateTextboxMenuItems, true);
  
@@ -330,18 +330,18 @@ diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/
        } else {
          this._addZoomKeys();
          this._loadInitialZoom();
-@@ -431,16 +432,19 @@ Toolbox.prototype = {
+@@ -440,16 +441,19 @@ Toolbox.prototype = {
    _prefChanged: function(event, data) {
-     switch(data.pref) {
-     case "devtools.cache.disabled":
-       this._applyCacheSettings();
-       break;
-     case "devtools.serviceWorkers.testing.enabled":
-       this._applyServiceWorkersTestingSettings();
-       break;
-+    case "devtools.serviceWorkers.forceUpdateOnRegistration":
-+      this._applyServiceWorkersForceUpdateOnRegistrationFlag();
-+      break;
+     switch (data.pref) {
+       case "devtools.cache.disabled":
+         this._applyCacheSettings();
+         break;
+       case "devtools.serviceWorkers.testing.enabled":
+         this._applyServiceWorkersTestingSettings();
+         break;
++      case "devtools.serviceWorkers.forceUpdateOnRegistration":
++        this._applyServiceWorkersForceUpdateOnRegistrationFlag();
++        break;
      }
    },
  
@@ -350,7 +350,7 @@ diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/
      key.addEventListener("command", () => {
        this.selectTool("options");
      }, true);
-@@ -795,16 +799,33 @@ Toolbox.prototype = {
+@@ -859,16 +863,33 @@ Toolbox.prototype = {
  
      if (this.target.activeTab) {
        this.target.activeTab.reconfigure({
@@ -384,26 +384,6 @@ diff --git a/browser/devtools/framework/toolbox.js b/browser/devtools/framework/
      if (isChecked) {
        this._pickerButton.setAttribute("checked", "true");
      } else {
-@@ -1761,17 +1782,18 @@ Toolbox.prototype = {
-     }
- 
-     // Now that we are closing the toolbox we can re-enable the cache settings
-     // and disable the service workers testing settings for the current tab.
-     // FF41+ automatically cleans up state in actor on disconnect.
-     if (this.target.activeTab && !this.target.activeTab.traits.noTabReconfigureOnClose) {
-       this.target.activeTab.reconfigure({
-         "cacheDisabled": false,
--        "serviceWorkersTestingEnabled": false
-+        "serviceWorkersTestingEnabled": false,
-+        "forceServiceWorkersUpdateOnRegistration": false
-       });
-     }
- 
-     // Destroying the walker and inspector fronts
-     outstanding.push(this.destroyInspector().then(() => {
-       // Removing buttons
-       if (this._pickerButton) {
-         this._pickerButton.removeEventListener("command", this._togglePicker, false);
 diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
 --- a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
 +++ b/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd
@@ -419,7 +399,7 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
 +<!-- LOCALIZATION NOTE (options.serviceWorkersForceUpdateOnRegistration.label,
 +  -  options.serviceWorkersForceUpdateOnRegistration.tooltip): This is the options panel label and
 +  -  tooltip for the checkbox that toggles on or off the force update on registration flag for service workers. -->
-+<!ENTITY options.serviceWorkersForceUpdateOnRegistration.label     "Force Service Workers to be update on registration (when toolbox is open)">
++<!ENTITY options.serviceWorkersForceUpdateOnRegistration.label     "Force Service Workers to be updated on registration (when toolbox is open)">
 +<!ENTITY options.serviceWorkersForceUpdateOnRegistration.tooltip   "Turning this option on will force the update of the service workers on registration for all tabs that have the toolbox open.">
 +
  <!-- LOCALIZATION NOTE (options.selectDefaultTools.label): This is the label for
@@ -433,7 +413,7 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
 diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 --- a/dom/base/nsDOMWindowUtils.cpp
 +++ b/dom/base/nsDOMWindowUtils.cpp
-@@ -3776,16 +3776,42 @@ nsDOMWindowUtils::GetServiceWorkersTesti
+@@ -3798,16 +3798,42 @@ nsDOMWindowUtils::GetServiceWorkersTesti
    NS_ENSURE_STATE(window);
  
    *aEnabled = window->GetServiceWorkersTestingEnabled();
@@ -564,7 +544,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
  interface nsIContentPermissionRequest;
  interface nsIObserver;
  
--[scriptable, uuid(098d9f0d-7809-4d3c-8fc6-e5b3fb71835b)]
+-[scriptable, uuid(ec176f3b-2886-4090-938e-dded103c5f1c)]
 +[scriptable, uuid(e97634c8-9abf-4a54-ac72-5c09ef130207)]
  interface nsIDOMWindowUtils : nsISupports {
  
@@ -589,14 +569,14 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
 +  attribute boolean forceServiceWorkerUpdateOnRegistration;
 +
 +  /**
-    * Increase the chaos mode activation level. An equivalent number of
-    * calls to leaveChaosMode must be made in order to restore the original
-    * chaos mode state. If the activation level is nonzero all chaos mode
-    * features are activated.
+    * Returns a JSObject which contains a list of frame uniformities
+    * when the pref gfx.vsync.collect-scroll-data is enabled.
+    * Every result contains a layer address and a frame uniformity for that layer.
+    * A negative frame uniformity value indicates an invalid frame uniformity and an error has occured.
     */
-   void enterChaosMode();
+   [implicit_jscontext] jsval getFrameUniformityTestData();
  
-   /**
+   /*
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
@@ -629,7 +609,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      , mPrincipal(aPrincipal)
      , mJobType(REGISTER_JOB)
      , mCanceled(false)
-+    , mForceUpdate(aForceUpdate)    
++    , mForceUpdate(aForceUpdate)
    { }
  
    // [[Update]]
