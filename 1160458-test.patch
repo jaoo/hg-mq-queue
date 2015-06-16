@@ -1,30 +1,28 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  5787d784485edff3d792d4c08cf4e76821aaadfd
-Bug 1160458 - Test
+# Parent  5d12aef122fa780267d1433ef768dbaf5ca75059
+Bug 1160458 - Part 2: Test. r=nsm
 
-diff --git a/dom/workers/test/serviceworkers/csp_worker.js b/dom/workers/test/serviceworkers/csp_worker.js
+diff --git a/dom/workers/test/serviceworkers/eval_worker.js b/dom/workers/test/serviceworkers/eval_worker.js
 new file mode 100644
 --- /dev/null
-+++ b/dom/workers/test/serviceworkers/csp_worker.js
-@@ -0,0 +1,4 @@
++++ b/dom/workers/test/serviceworkers/eval_worker.js
+@@ -0,0 +1,1 @@
 +eval('1+1');
-+
-+self.addEventListener('install', evt => {
-+});
 diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
 --- a/dom/workers/test/serviceworkers/mochitest.ini
 +++ b/dom/workers/test/serviceworkers/mochitest.ini
-@@ -124,16 +124,17 @@ support-files =
-   sw_clients/refresher_compressed.html
-   sw_clients/refresher_compressed.html^headers^
-   sw_clients/refresher_cached.html
-   sw_clients/refresher_cached_compressed.html
-   sw_clients/refresher_cached_compressed.html^headers^
-   strict_mode_error.js
-   skip_waiting_installed_worker.js
-   skip_waiting_scope/index.html
-+  csp_worker.js
+@@ -132,16 +132,18 @@ support-files =
+   thirdparty/iframe1.html
+   thirdparty/iframe2.html
+   thirdparty/register.html
+   thirdparty/unregister.html
+   thirdparty/sw.js
+   register_https.html
+   gzip_redirect_worker.js
+   sw_clients/navigator.html
++  eval_worker.js
++  test_eval_not_allowed.html^headers^
  
  [test_unregister.html]
  [test_installation_simple.html]
@@ -33,28 +31,21 @@ diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/se
  [test_https_fetch_cloned_response.html]
  [test_https_synth_fetch_from_cached_sw.html]
  [test_match_all.html]
-@@ -164,16 +165,17 @@ support-files =
- [test_claim.html]
- [test_periodic_https_update.html]
- [test_sanitize.html]
- [test_sanitize_domain.html]
- [test_service_worker_allowed.html]
- [test_app_protocol.html]
- [test_claim_fetch.html]
- [test_force_refresh.html]
-+[test_csp.html]
- [test_skip_waiting.html]
- [test_strict_mode_error.html]
- [test_cross_origin_url_after_redirect.html]
- [test_origin_after_redirect.html]
+@@ -185,8 +187,10 @@ support-files =
  [test_origin_after_redirect_cached.html]
  [test_origin_after_redirect_to_https.html]
  [test_origin_after_redirect_to_https_cached.html]
  [test_https_origin_after_redirect.html]
-diff --git a/dom/workers/test/serviceworkers/test_csp.html b/dom/workers/test/serviceworkers/test_csp.html
+ [test_https_origin_after_redirect_cached.html]
+ [test_gzip_redirect.html]
+ [test_register_base.html]
+ [test_register_https_in_http.html]
++[test_eval_allowed.html]
++[test_eval_not_allowed.html]
+diff --git a/dom/workers/test/serviceworkers/test_eval_allowed.html b/dom/workers/test/serviceworkers/test_eval_allowed.html
 new file mode 100644
 --- /dev/null
-+++ b/dom/workers/test/serviceworkers/test_csp.html
++++ b/dom/workers/test/serviceworkers/test_eval_allowed.html
 @@ -0,0 +1,42 @@
 +<!--
 +  Any copyright is dedicated to the Public Domain.
@@ -73,13 +64,14 @@ new file mode 100644
 +<pre id="test"></pre>
 +<script class="testbody" type="text/javascript">
 +  function register() {
-+    return navigator.serviceWorker.register("csp_worker.js");
++    return navigator.serviceWorker.register("eval_worker.js");
 +  }
 +
 +  function runTest() {
 +    register()
-+      .then(function() {
++      .then(function(swr) {
 +        ok(true, "eval in service worker script didn't cause an issue");
++        swr.unregister();
 +        SimpleTest.finish();
 +      }).catch(function(e) {
 +        ok(false, "Some test failed with error " + e);
@@ -90,7 +82,6 @@ new file mode 100644
 +  SimpleTest.waitForExplicitFinish();
 +  SpecialPowers.pushPrefEnv({"set": [
 +    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
-+    ["dom.messageChannel.enabled", true],
 +    ["dom.serviceWorkers.enabled", true],
 +    ["dom.serviceWorkers.testing.enabled", true]
 +  ]}, runTest);
@@ -98,3 +89,59 @@ new file mode 100644
 +</pre>
 +</body>
 +</html>
+diff --git a/dom/workers/test/serviceworkers/test_eval_not_allowed.html b/dom/workers/test/serviceworkers/test_eval_not_allowed.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/test_eval_not_allowed.html
+@@ -0,0 +1,45 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1160458 - CSP activated by default in Service Workers</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++  function register() {
++    return navigator.serviceWorker.register("eval_worker.js");
++  }
++
++  function runTest() {
++    register()
++      .then(function(swr) {
++        ok(false, "eval in service worker should not be allowed when the policy prevents it");
++        swr.unregister();
++        SimpleTest.finish();
++      }).catch(function() {
++        ok(true, "eval in service worker is not allowed when the policy prevents eval");
++        SimpleTest.finish();
++      }).catch(function(e) {
++        ok(false, "Some test failed with error " + e);
++        SimpleTest.finish();
++      });
++  }
++
++  SimpleTest.waitForExplicitFinish();
++  SpecialPowers.pushPrefEnv({"set": [
++    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++    ["dom.serviceWorkers.enabled", true],
++    ["dom.serviceWorkers.testing.enabled", true]
++  ]}, runTest);
++</script>
++</pre>
++</body>
++</html>
+diff --git a/dom/workers/test/serviceworkers/test_eval_not_allowed.html^headers^ b/dom/workers/test/serviceworkers/test_eval_not_allowed.html^headers^
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/test_eval_not_allowed.html^headers^
+@@ -0,0 +1,1 @@
++Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'"

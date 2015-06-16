@@ -1,33 +1,43 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  72df8368c168ae6e0b8123eece030f30b4be8c2e
-Bug 1160458 - CSP activated by default in Service Workers. r=nsm,bent
+# Parent  ce863f9d8864c5014f8f39d295649d6c4e3ffbf5
+Bug 1160458 - Part 1: Use the CSP of the principal passed to CreateServiceWorker. r=nsm
 
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -2961,20 +2961,24 @@ ServiceWorkerManager::CreateServiceWorke
- 
-   rv = info.mBaseURI->GetHost(info.mDomain);
-   if (NS_WARN_IF(NS_FAILED(rv))) {
+@@ -3575,16 +3575,34 @@ ServiceWorkerManager::CreateServiceWorke
      return rv;
    }
  
    info.mPrincipal = aPrincipal;
  
-+  info.mEvalAllowed = true;
-+  info.mReportCSPViolations = false;
+   info.mIndexedDBAllowed =
+     indexedDB::IDBFactory::AllowedForPrincipal(aPrincipal);
+ 
++  nsCOMPtr<nsIContentSecurityPolicy> csp;
++  rv = aPrincipal->GetCsp(getter_AddRefs(csp));
++  if (NS_WARN_IF(NS_FAILED(rv))) {
++    return rv;
++  }
++
++  info.mCSP = csp;
++  if (info.mCSP) {
++    rv = info.mCSP->GetAllowsEval(&info.mReportCSPViolations,
++                                  &info.mEvalAllowed);
++    if (NS_WARN_IF(NS_FAILED(rv))) {
++      return rv;
++    }
++  } else {
++    info.mEvalAllowed = true;
++    info.mReportCSPViolations = false;
++  }
 +
    // NOTE: this defaults the SW load context to:
    //  - private browsing = false
    //  - content = true
    //  - use remote tabs = false
-+  //  - eval allowed = true
    // Alternatively we could persist the original load group values and use
    // them here.
    WorkerPrivate::OverrideLoadInfoLoadGroup(info);
  
-   RuntimeService* rs = RuntimeService::GetOrCreateService();
-   if (!rs) {
-     return NS_ERROR_FAILURE;
-   }
