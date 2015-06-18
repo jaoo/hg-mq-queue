@@ -1,12 +1,30 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  d21c9a09112d8bf49bb582e9877140f3d15bd674
-Bug 1171915 - about:serviceworkers in b2g should use originAttributes when calling ServiceWorkerManager. r=fabrice
+# Parent  11650d005d39f58e0e46f46fe576c398bc0afac1
+Bug 1171915 - about:serviceworkers in b2g should use originAttributes when calling ServiceWorkerManager. r=baku,fabrice
 
 diff --git a/b2g/components/AboutServiceWorkers.jsm b/b2g/components/AboutServiceWorkers.jsm
 --- a/b2g/components/AboutServiceWorkers.jsm
 +++ b/b2g/components/AboutServiceWorkers.jsm
-@@ -31,18 +31,17 @@ function serializeServiceWorkerInfo(aSer
+@@ -14,35 +14,34 @@ Cu.import("resource://gre/modules/XPCOMU
+ XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
+                                   "resource://gre/modules/SystemAppProxy.jsm");
+ 
+ XPCOMUtils.defineLazyServiceGetter(this, "gServiceWorkerManager",
+                                   "@mozilla.org/serviceworkers/manager;1",
+                                   "nsIServiceWorkerManager");
+ 
+ function debug(aMsg) {
+-  //dump("AboutServiceWorkers - " + aMsg + "\n");
++  // dump("AboutServiceWorkers - " + aMsg + "\n");
+ }
+ 
+ function serializeServiceWorkerInfo(aServiceWorkerInfo) {
+   if (!aServiceWorkerInfo) {
+     throw new Error("Invalid service worker information");
+   }
+ 
+   let result = {};
  
    Object.keys(aServiceWorkerInfo).forEach(property => {
      if (typeof aServiceWorkerInfo[property] == "function") {
