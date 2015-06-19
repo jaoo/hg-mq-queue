@@ -1,0 +1,72 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  2694ff2ace6a1b5f6d283c5eafafac730487b189
+Bug 1154719 - Return a Promise from nsIServiceWorkerManager::Update() to let about:serviceworkers reload itself once the update operation is finished. r=eshan
+
+diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
+--- a/dom/interfaces/base/nsIServiceWorkerManager.idl
++++ b/dom/interfaces/base/nsIServiceWorkerManager.idl
+@@ -28,17 +28,17 @@ interface nsIServiceWorkerInfo : nsISupp
+   readonly attribute DOMString scope;
+   readonly attribute DOMString scriptSpec;
+   readonly attribute DOMString currentWorkerURL;
+ 
+   readonly attribute DOMString activeCacheName;
+   readonly attribute DOMString waitingCacheName;
+ };
+ 
+-[scriptable, builtinclass, uuid(5e112a42-df4c-4ae9-bc71-e6e681ab5f38)]
++[scriptable, builtinclass, uuid(177b6168-3699-42a8-85e6-6c64d6365c51)]
+ interface nsIServiceWorkerManager : nsISupports
+ {
+   /**
+    * Registers a ServiceWorker with script loaded from `aScriptURI` to act as
+    * the ServiceWorker for aScope.  Requires a valid entry settings object on
+    * the stack. This means you must call this from content code 'within'
+    * a window.
+    *
+@@ -116,18 +116,19 @@ interface nsIServiceWorkerManager : nsIS
+   DOMString getScopeForUrl(in nsIPrincipal aPrincipal, in DOMString aPath);
+ 
+   // Note: This is meant to be used only by about:serviceworkers.
+   //It returns an array of nsIServiceWorkerInfo.
+   nsIArray getAllRegistrations();
+ 
+   // Note: This is meant to be used only by about:serviceworkers.
+   // It calls softUpdate() for each child process.
+-  [implicit_jscontext] void propagateSoftUpdate(in jsval aOriginAttributes,
+-                                                in DOMString aScope);
++  // Returns a Promise.
++  [implicit_jscontext] nsISupports propagateSoftUpdate(in jsval aOriginAttributes,
++                                                       in DOMString aScope);
+ 
+   // Note: This is meant to be used only by about:serviceworkers.
+   // It calls unregister() in each child process. The callback is used to
+   // inform when unregister() is completed on the current process.
+   void propagateUnregister(in nsIPrincipal aPrincipal,
+                            in nsIServiceWorkerUnregisterCallback aCallback,
+                            in DOMString aScope);
+ 
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -4444,17 +4444,18 @@ ServiceWorkerManager::Observe(nsISupport
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ ServiceWorkerManager::PropagateSoftUpdate(JS::Handle<JS::Value> aOriginAttributes,
+                                           const nsAString& aScope,
+-                                          JSContext* aCx)
++                                          JSContext* aCx,
++                                          nsISupports** aPromise)
+ {
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+   OriginAttributes attrs;
+   if (!aOriginAttributes.isObject() || !attrs.Init(aCx, aOriginAttributes)) {
+     return NS_ERROR_INVALID_ARG;
+   }
+ 
