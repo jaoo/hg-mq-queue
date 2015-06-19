@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  f0f6af6d2ed762bc8663dc4353b3abae4af4717b
+try: -b o -p emulator -u mochitest-chrome -t none
+

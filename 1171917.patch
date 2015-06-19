@@ -1,44 +1,92 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  d02a225cebba8ea503af0b8afad6dbc4592513c7
+# Parent  2694ff2ace6a1b5f6d283c5eafafac730487b189
 Bug 1171917 - Improve about:serviceworkers tests on b2g. r=baku,fabrice
 
-diff --git a/b2g/components/AboutServiceWorkers.jsm b/b2g/components/AboutServiceWorkers.jsm
---- a/b2g/components/AboutServiceWorkers.jsm
-+++ b/b2g/components/AboutServiceWorkers.jsm
-@@ -14,17 +14,17 @@ Cu.import("resource://gre/modules/XPCOMU
- XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
-                                   "resource://gre/modules/SystemAppProxy.jsm");
- 
- XPCOMUtils.defineLazyServiceGetter(this, "gServiceWorkerManager",
-                                   "@mozilla.org/serviceworkers/manager;1",
-                                   "nsIServiceWorkerManager");
- 
- function debug(aMsg) {
--  //dump("AboutServiceWorkers - " + aMsg + "\n");
-+  dump("AboutServiceWorkers - " + aMsg + "\n");
- }
- 
- function serializeServiceWorkerInfo(aServiceWorkerInfo) {
-   if (!aServiceWorkerInfo) {
-     throw new Error("Invalid service worker information");
-   }
- 
-   let result = {};
+diff --git a/b2g/components/test/mochitest/app/index.html b/b2g/components/test/mochitest/app/index.html
+new file mode 100644
+--- /dev/null
++++ b/b2g/components/test/mochitest/app/index.html
+@@ -0,0 +1,41 @@
++<!DOCTYPE html>
++<html>
++  <head>
++    <title>Test app for bug 1171917</title>
++    <script type='application/javascript;version=1.7'>
++function ok(aCondition, aMessage) {
++  if (aCondition) {
++    alert('OK: ' + aMessage);
++  } else {
++    alert('KO: ' + aMessage);
++  }
++}
++
++function ready() {
++  alert('READY');
++}
++
++function registerServiceWorker() {
++  return new Promise((resolve, reject) => {
++    navigator.serviceWorker.ready.then(() => {
++      ready();
++      resolve();
++    });
++    navigator.serviceWorker.register('sw.js', {scope: '.'})
++    .then(registration => {
++      ok(true, 'service worker registered');
++    })
++    .catch(reject);
++  });
++}
++
++function runTests() {
++  return Promise.resolve()
++    .then(registerServiceWorker)
++    .then(ready)
++}
++    </script>
++  </head>
++  <body onload='runTests()'>
++  </body>
++</html>
+diff --git a/b2g/components/test/mochitest/app/manifest.webapp b/b2g/components/test/mochitest/app/manifest.webapp
+new file mode 100644
+--- /dev/null
++++ b/b2g/components/test/mochitest/app/manifest.webapp
+@@ -0,0 +1,5 @@
++{
++  "name": "App",
++  "launch_path": "/index.html",
++  "description": "Test app for bug 1171917"
++}
+diff --git a/b2g/components/test/mochitest/app/manifest.webapp^headers^ b/b2g/components/test/mochitest/app/manifest.webapp^headers^
+new file mode 100644
+--- /dev/null
++++ b/b2g/components/test/mochitest/app/manifest.webapp^headers^
+@@ -0,0 +1,1 @@
++Content-Type: application/manifest+json
+diff --git a/b2g/components/test/mochitest/app/sw.js b/b2g/components/test/mochitest/app/sw.js
+new file mode 100644
+--- /dev/null
++++ b/b2g/components/test/mochitest/app/sw.js
+@@ -0,0 +1,1 @@
++// Useless service worker.
 diff --git a/b2g/components/test/mochitest/chrome.ini b/b2g/components/test/mochitest/chrome.ini
 new file mode 100644
 --- /dev/null
 +++ b/b2g/components/test/mochitest/chrome.ini
-@@ -0,0 +1,4 @@
+@@ -0,0 +1,6 @@
 +[DEFAULT]
 +skip-if = toolkit != "gonk"
++support-files =
++  app/*
 +
 +[test_aboutserviceworkers.html]
 diff --git a/b2g/components/test/mochitest/test_aboutserviceworkers.html b/b2g/components/test/mochitest/test_aboutserviceworkers.html
 new file mode 100644
 --- /dev/null
 +++ b/b2g/components/test/mochitest/test_aboutserviceworkers.html
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,174 @@
 +<!DOCTYPE HTML>
 +<html>
 +<!--
@@ -49,33 +97,148 @@ new file mode 100644
 +  <title>Test for Bug 1171917</title>
 +  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
 +  <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"/>
-+</head>
-+<body onload="go()">
-+<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=1171917">Mozilla Bug 1171917</a>
-+<p id="display"></p>
-+<div id="content" style="display: none">
-+</div>
-+<pre id="test">
 +  <script type="application/javascript;version=1.7">
++
++const ASW_CHROME_EVENT = 'mozAboutServiceWorkersChromeEvent';
++const ASW_CONTENT_EVENT = 'mozAboutServiceWorkersContentEvent';
 +
 +const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 +
++Cu.import("resource://gre/modules/XPCOMUtils.jsm");
++XPCOMUtils.defineLazyServiceGetter(this, "gAppsService",
++                                   "@mozilla.org/AppsService;1",
++                                   "nsIAppsService");
 +SimpleTest.waitForExplicitFinish();
++
++const gOrigin = 'http://test/chrome/dom/workers/test/serviceworkers/app';
++const appManifestURL = gOrigin + '/manifest.webapp';
++let gApp;
++
++function sendContentEvent(detail) {
++  let event = new CustomEvent(ASW_CONTENT_EVENT, {
++    detail: detail
++  });
++  window.dispatchEvent(event);
++}
++
++function chromeRequest(request) {
++  if (!request) {
++    return Promise.reject('InternalErrorMissingEventDetail');
++  }
++
++  return new Promise((resolve, reject) => {
++    let id = request.id;
++    window.addEventListener(ASW_CHROME_EVENT,
++                            function onChromeEvent(event) {
++      window.removeEventListener(ASW_CHROME_EVENT, onChromeEvent);
++      let message = event.detail;
++      if (!message || !message.id || message.id != id) {
++        return reject('InternalErrorWrongChromeEvent');
++      }
++
++      if (message.error) {
++        reject(message.error);
++      } else if (message.result) {
++        resolve(message.result);
++      }
++    });
++
++    sendContentEvent(request);
++  });
++}
++
++function uninstallApp() {
++  return new Promise((resolve, reject) => {
++    if (!gApp) {
++      return reject();
++    }
++    let req = navigator.mozApps.mgmt.uninstall(gApp);
++    req.onsuccess = resolve;
++    req.onerror = reject;
++  });
++}
++
++function launchApp() {
++  if (!gApp) {
++    ok(false, 'No test application to launch');
++    return Promise.reject();
++  }
++  return new Promise((resolve, reject) => {
++    let iframe = document.createElement('iframe');
++    iframe.setAttribute('mozbrowser', 'true');
++    iframe.setAttribute('mozapp', gApp.manifestURL);
++    iframe.addEventListener('mozbrowsershowmodalprompt', function listener(e) {
++      let message = e.detail.message;
++      if (/OK/.exec(message)) {
++        ok(true, "Message from app: " + message);
++      } else if (/READY/.exec(message)) {
++        ok(true, "Message from app: " + message);
++        resolve();
++      }
++    }, false);
++    let domParent = document.getElementById('container');
++    domParent.appendChild(iframe);
++    ok(true, "origin " +  gOrigin + gApp.manifest.launch_path);
++    SpecialPowers.wrap(iframe.contentWindow).location =
++      gOrigin + gApp.manifest.launch_path;
++  });
++}
++
++function installApp() {
++  return new Promise((resolve, reject) => {
++    let req = navigator.mozApps.install(appManifestURL);
++    req.onsuccess = function() {
++      gApp = req.result;
++      is(req.result.manifestURL, appManifestURL, 'app installed');
++      if (req.result.installState == 'installed') {
++        is(req.result.installState, 'installed', 'app downloaded');
++        resolve()
++      } else {
++        req.result.ondownloadapplied = function() {
++          is(req.result.installState, 'installed', 'app downloaded');
++          resolve();
++        }
++      }
++    }
++    req.onerror = reject;
++  });
++}
 +
 +function setup() {
 +  info('Setting up');
 +  return new Promise((resolve, reject) => {
-+    SpecialPowers.pushPrefEnv({"set": [
-+      ["dom.serviceWorkers.exemptFromPerDomainMax", true],
-+      ["dom.messageChannel.enabled", true],
-+      ["dom.serviceWorkers.enabled", true],
-+      ["dom.serviceWorkers.testing.enabled", true]
-+    ]}, resolve);
++    SpecialPowers.setAllAppsLaunchable(true);
++    SpecialPowers.pushPrefEnv({'set': [
++      ['dom.mozBrowserFramesEnabled', true],
++      ['dom.serviceWorkers.exemptFromPerDomainMax', true],
++      ['dom.serviceWorkers.enabled', true],
++      ['dom.serviceWorkers.testing.enabled', true]
++    ]}, () => {
++      SpecialPowers.pushPermissions([
++        { 'type': 'webapps-manage', 'allow': 1, 'context': document },
++        { 'type': 'browser', 'allow': 1, 'context': document },
++        { 'type': 'embed-apps', 'allow': 1, 'context': document }
++      ], () => {
++        SpecialPowers.autoConfirmAppInstall(() => {
++          SpecialPowers.autoConfirmAppUninstall(resolve);
++        });
++      });
++    });
 +  });
 +}
 +
 +function go() {
 +  setup()
++    .then(installApp)
++    .then(launchApp)
++    .then(function () {
++      return chromeRequest({id: 0, name: 'init'});
++    })
++    .then(function (result) {
++      info(JSON.stringify(result));
++      return Promise.resolve();
++    })
++    .then(uninstallApp)
 +    .then(() => {
 +      ok(true, 'Hello world test bug 1171917');
 +      return Promise.resolve();
@@ -87,6 +250,13 @@ new file mode 100644
 +    });
 +}
 +  </script>
++</head>
++<body onload="go()">
++<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=1171917">Mozilla Bug 1171917</a>
++<p id="display"></p>
++<div id="content" style="display: none">
++</div>
++<pre id="test">
 +</pre>
 +<div id="container"></div>
 +</body>
