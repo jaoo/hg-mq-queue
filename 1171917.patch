@@ -3,6 +3,28 @@
 # Parent  2694ff2ace6a1b5f6d283c5eafafac730487b189
 Bug 1171917 - Improve about:serviceworkers tests on b2g. r=baku,fabrice
 
+diff --git a/b2g/components/AboutServiceWorkers.jsm b/b2g/components/AboutServiceWorkers.jsm
+--- a/b2g/components/AboutServiceWorkers.jsm
++++ b/b2g/components/AboutServiceWorkers.jsm
+@@ -14,17 +14,17 @@ Cu.import("resource://gre/modules/XPCOMU
+ XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
+                                   "resource://gre/modules/SystemAppProxy.jsm");
+ 
+ XPCOMUtils.defineLazyServiceGetter(this, "gServiceWorkerManager",
+                                   "@mozilla.org/serviceworkers/manager;1",
+                                   "nsIServiceWorkerManager");
+ 
+ function debug(aMsg) {
+-  //dump("AboutServiceWorkers - " + aMsg + "\n");
++  dump("AboutServiceWorkers - " + aMsg + "\n");
+ }
+ 
+ function serializeServiceWorkerInfo(aServiceWorkerInfo) {
+   if (!aServiceWorkerInfo) {
+     throw new Error("Invalid service worker information");
+   }
+ 
+   let result = {};
 diff --git a/b2g/components/test/mochitest/app/index.html b/b2g/components/test/mochitest/app/index.html
 new file mode 100644
 --- /dev/null
