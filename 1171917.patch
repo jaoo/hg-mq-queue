@@ -143,7 +143,7 @@ new file mode 100644
 +const ORIGINAL_SENDRESULT = AboutServiceWorkers.sendResult;
 +const ORIGINAL_SENDERROR = AboutServiceWorkers.sendError;
 +
-+funtion mockInit() {
++function mockInit() {
 +  window.addEventListener(ASW_CONTENT_EVENT, AboutServiceWorkers);
 +}
 +
