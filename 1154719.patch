@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  2694ff2ace6a1b5f6d283c5eafafac730487b189
+# Parent  be81b8d6fae99c89e8b14591b11dd26eec0a416e
 Bug 1154719 - Return a Promise from nsIServiceWorkerManager::Update() to let about:serviceworkers reload itself once the update operation is finished. r=eshan
 
 diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/base/nsIServiceWorkerManager.idl
@@ -15,7 +15,7 @@ diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/ba
    readonly attribute DOMString waitingCacheName;
  };
  
--[scriptable, builtinclass, uuid(5e112a42-df4c-4ae9-bc71-e6e681ab5f38)]
+-[scriptable, builtinclass, uuid(aee94712-9adb-4c0b-80a7-a8df34dfa2e8)]
 +[scriptable, builtinclass, uuid(177b6168-3699-42a8-85e6-6c64d6365c51)]
  interface nsIServiceWorkerManager : nsISupports
  {
@@ -25,7 +25,7 @@ diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/ba
     * the stack. This means you must call this from content code 'within'
     * a window.
     *
-@@ -116,18 +116,19 @@ interface nsIServiceWorkerManager : nsIS
+@@ -111,18 +111,19 @@ interface nsIServiceWorkerManager : nsIS
    DOMString getScopeForUrl(in nsIPrincipal aPrincipal, in DOMString aPath);
  
    // Note: This is meant to be used only by about:serviceworkers.
@@ -50,7 +50,7 @@ diff --git a/dom/interfaces/base/nsIServiceWorkerManager.idl b/dom/interfaces/ba
 diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
 --- a/dom/workers/ServiceWorkerManager.cpp
 +++ b/dom/workers/ServiceWorkerManager.cpp
-@@ -4444,17 +4444,18 @@ ServiceWorkerManager::Observe(nsISupport
+@@ -4554,32 +4554,43 @@ ServiceWorkerManager::Observe(nsISupport
    }
  
    return NS_OK;
@@ -70,3 +70,52 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
      return NS_ERROR_INVALID_ARG;
    }
  
++  nsCOMPtr<nsIGlobalObject> sgo = xpc::NativeGlobal(JS::CurrentGlobalOrNull(aCx));
++  ErrorResult result;
++  nsRefPtr<Promise> promise = Promise::Create(sgo, result);
++  if (result.Failed()) {
++    return result.StealNSResult();
++  }
++
+   PropagateSoftUpdate(attrs, aScope);
++
++  promise.forget(aPromise);
+   return NS_OK;
+ }
+ 
+ void
+ ServiceWorkerManager::PropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
+-                                          const nsAString& aScope)
++                                          const nsAString& aScope,
++                                          Promise *aPromise)
+ {
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+   if (!mActor) {
+     nsRefPtr<nsIRunnable> runnable =
+       new PropagateSoftUpdateRunnable(aOriginAttributes, aScope);
+     AppendPendingOperation(runnable);
+     return;
+diff --git a/dom/workers/ServiceWorkerManager.h b/dom/workers/ServiceWorkerManager.h
+--- a/dom/workers/ServiceWorkerManager.h
++++ b/dom/workers/ServiceWorkerManager.h
+@@ -301,17 +301,18 @@ public:
+   void
+   SoftUpdate(nsIPrincipal* aPrincipal, const nsACString& aScope);
+ 
+   void
+   SoftUpdate(const OriginAttributes& aOriginAttributes, const nsACString& aScope);
+ 
+   void
+   PropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
+-                      const nsAString& aScope);
++                      const nsAString& aScope
++                      Promise *aPromise);
+ 
+   void
+   PropagateRemove(const nsACString& aHost);
+ 
+   void
+   Remove(const nsACString& aHost);
+ 
+   void
