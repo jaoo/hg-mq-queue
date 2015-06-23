@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  2694ff2ace6a1b5f6d283c5eafafac730487b189
+# Parent  be81b8d6fae99c89e8b14591b11dd26eec0a416e
 Bug 1171917 - Improve about:serviceworkers tests on b2g. r=baku,fabrice
 
 diff --git a/b2g/components/AboutServiceWorkers.jsm b/b2g/components/AboutServiceWorkers.jsm
@@ -108,7 +108,7 @@ diff --git a/b2g/components/test/mochitest/test_aboutserviceworkers.html b/b2g/c
 new file mode 100644
 --- /dev/null
 +++ b/b2g/components/test/mochitest/test_aboutserviceworkers.html
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,218 @@
 +<!DOCTYPE HTML>
 +<html>
 +<!--
@@ -130,11 +130,52 @@ new file mode 100644
 +XPCOMUtils.defineLazyServiceGetter(this, "gAppsService",
 +                                   "@mozilla.org/AppsService;1",
 +                                   "nsIAppsService");
++XPCOMUtils.defineLazyModuleGetter(this, "AboutServiceWorkers",
++  "resource://gre/modules/AboutServiceWorkers.jsm");
++
 +SimpleTest.waitForExplicitFinish();
 +
 +const gOrigin = 'http://test/chrome/dom/workers/test/serviceworkers/app';
 +const appManifestURL = gOrigin + '/manifest.webapp';
 +let gApp;
++
++const ORIGINAL_INIT = AboutServiceWorkers.init;
++const ORIGINAL_SENDRESULT = AboutServiceWorkers.sendResult;
++const ORIGINAL_SENDERROR = AboutServiceWorkers.sendError;
++
++funtion mockInit() {
++  window.addEventListener(ASW_CONTENT_EVENT, AboutServiceWorkers);
++}
++
++function mockSendResult(aId, aResult) {
++  let event = new CustomEvent(ASW_CHROME_EVENT, {
++    id: aId,
++    result: aResult
++  });
++  window.dispatchEvent(event);
++}
++
++function mockSendError(aId, aError) {
++  let event = new CustomEvent(ASW_CHROME_EVENT, {
++    id: aId,
++    result: aError
++  });
++  window.dispatchEvent(event);
++}
++
++function attachMocks() {
++  AboutServiceWorkers.init = mockInit;
++  AboutServiceWorkers.sendResult = mockSendResult;
++  AboutServiceWorkers.sendError = mockSendError;
++  return Promise.resolve();
++}
++
++function restoreMocks() {
++  AboutServiceWorkers.init = ORIGINAL_INIT;
++  AboutServiceWorkers.sendResult = ORIGINAL_SENDRESULT;
++  AboutServiceWorkers.sendError = ORIGINAL_SENDERROR;
++  return Promise.resolve();
++}
 +
 +function sendContentEvent(detail) {
 +  let event = new CustomEvent(ASW_CONTENT_EVENT, {
@@ -251,9 +292,11 @@ new file mode 100644
 +
 +function go() {
 +  setup()
++    .then(attachMocks)
 +    .then(installApp)
 +    .then(launchApp)
 +    .then(function () {
++      info('Send chrome request');
 +      return chromeRequest({id: 0, name: 'init'});
 +    })
 +    .then(function (result) {
@@ -265,6 +308,7 @@ new file mode 100644
 +      ok(true, 'Hello world test bug 1171917');
 +      return Promise.resolve();
 +    })
++    .then(restoreMocks)
 +    .then(SimpleTest.finish)
 +    .catch((e) => {
 +      ok(false, 'Unexpected error ' + e);
