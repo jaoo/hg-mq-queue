@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  7d4ab4a9febdf66c18d752afd4bd241c41be921f
+# Parent  56e207dbb3bda446e30c8a9fcf16050f35a58fb9
 Enable service workers on b2g
 
 diff --git a/b2g/app/b2g.js b/b2g/app/b2g.js
 --- a/b2g/app/b2g.js
 +++ b/b2g/app/b2g.js
-@@ -1128,14 +1128,21 @@ pref("dom.requestSync.enabled", true);
+@@ -1143,14 +1143,22 @@ pref("dom.requestSync.enabled", true);
  
  // Resample touch events on b2g
  pref("gfx.touch.resample", true);
@@ -30,4 +30,5 @@ diff --git a/b2g/app/b2g.js b/b2g/app/b2g.js
 +pref('dom.apps.developer_mode', true);
 +pref('dom.webcomponents.enabled', true);
 +pref("dom.serviceWorkers.enabled", true);
++pref("dom.serviceWorkers.interception.enabled", true);
 +pref("dom.serviceWorkers.testing.enabled", true);

@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  be81b8d6fae99c89e8b14591b11dd26eec0a416e
+# Parent  eaf4f9b45117a36aa46e3e770ff2bff52dda1282
 Bug 1171917 - Improve about:serviceworkers tests on b2g. r=baku,fabrice
 
 diff --git a/b2g/components/AboutServiceWorkers.jsm b/b2g/components/AboutServiceWorkers.jsm
@@ -15,7 +15,7 @@ diff --git a/b2g/components/AboutServiceWorkers.jsm b/b2g/components/AboutServic
                                    "nsIServiceWorkerManager");
  
  function debug(aMsg) {
--  //dump("AboutServiceWorkers - " + aMsg + "\n");
+-  // dump("AboutServiceWorkers - " + aMsg + "\n");
 +  dump("AboutServiceWorkers - " + aMsg + "\n");
  }
  
@@ -108,7 +108,7 @@ diff --git a/b2g/components/test/mochitest/test_aboutserviceworkers.html b/b2g/c
 new file mode 100644
 --- /dev/null
 +++ b/b2g/components/test/mochitest/test_aboutserviceworkers.html
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,236 @@
 +<!DOCTYPE HTML>
 +<html>
 +<!--
@@ -135,7 +135,7 @@ new file mode 100644
 +
 +SimpleTest.waitForExplicitFinish();
 +
-+const gOrigin = 'http://test/chrome/b2g/components/test/app';
++const gOrigin = 'http://test/chrome/b2g/components/test/mochitest/app';
 +const appManifestURL = gOrigin + '/manifest.webapp';
 +let gApp;
 +
@@ -143,11 +143,19 @@ new file mode 100644
 +const ORIGINAL_SENDRESULT = AboutServiceWorkers.sendResult;
 +const ORIGINAL_SENDERROR = AboutServiceWorkers.sendError;
 +
++function debug(aMsg) {
++  dump("test_aboutserviceworkers.html - " + aMsg + "\n");
++}
++
 +function mockInit() {
 +  window.addEventListener(ASW_CONTENT_EVENT, AboutServiceWorkers);
 +}
 +
 +function mockSendResult(aId, aResult) {
++  debug("mockSendResult, " + JSON.stringify({ detail : {
++    id: aId,
++    result: aResult
++  }}));
 +  let event = new CustomEvent(ASW_CHROME_EVENT, { detail : {
 +    id: aId,
 +    result: aResult
@@ -156,6 +164,10 @@ new file mode 100644
 +}
 +
 +function mockSendError(aId, aError) {
++  debug("mockSendError, " + JSON.stringify({ detail : {
++    id: aId,
++    result: aError
++  }}));
 +  let event = new CustomEvent(ASW_CHROME_EVENT, { detail: {
 +    id: aId,
 +    result: aError
@@ -293,16 +305,26 @@ new file mode 100644
 +function go() {
 +  setup()
 +    .then(attachMocks)
-+    .then(function (result) {
++    .then(() => {
 +      AboutServiceWorkers.init();
 +      return Promise.resolve();
 +    })
 +    .then(installApp)
 +    .then(launchApp)
-+    .then(function () {
-+      info('Send chrome request');
-+      return chromeRequest({id: "0", name: "init"});
++    .then(() => {
++      return chromeRequest({
++        id: "0",
++        name: "init"
++      });
 +    })
++    <!-- .then((result) => { -->
++    <!--   return chromeRequest({ -->
++    <!--     id: "1", -->
++    <!--     name: "update", -->
++    <!--     principal: result.registrations[0].principal, -->
++    <!--     scope: result.registrations[0].scope -->
++    <!--   }); -->
++    <!-- }) -->
 +    .then(uninstallApp)
 +    .then(restoreMocks)
 +    .then(SimpleTest.finish)
@@ -336,196 +358,83 @@ diff --git a/b2g/components/test/moz.build b/b2g/components/test/moz.build
  XPCSHELL_TESTS_MANIFESTS += ['unit/xpcshell.ini']
  MOCHITEST_MANIFESTS += ['mochitest/mochitest.ini']
 +MOCHITEST_CHROME_MANIFESTS += ['mochitest/chrome.ini']
-diff --git a/browser/components/AboutServiceWorkers.jsm b/browser/components/AboutServiceWorkers.jsm
-new file mode 100644
---- /dev/null
+diff --git a/b2g/components/AboutServiceWorkers.jsm b/browser/components/AboutServiceWorkers.jsm
+copy from b2g/components/AboutServiceWorkers.jsm
+copy to browser/components/AboutServiceWorkers.jsm
+--- a/b2g/components/AboutServiceWorkers.jsm
 +++ b/browser/components/AboutServiceWorkers.jsm
-@@ -0,0 +1,185 @@
-+/* This Source Code Form is subject to the terms of the Mozilla Public
-+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
-+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
-+
-+"use strict"
-+
-+this.EXPORTED_SYMBOLS = ["AboutServiceWorkers"];
-+
-+const { interfaces: Ci, utils: Cu } = Components;
-+
-+Cu.import("resource://gre/modules/Services.jsm");
-+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-+
+@@ -6,25 +6,25 @@
+ 
+ this.EXPORTED_SYMBOLS = ["AboutServiceWorkers"];
+ 
+ const { interfaces: Ci, utils: Cu } = Components;
+ 
+ Cu.import("resource://gre/modules/Services.jsm");
+ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+ 
+-XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
+-                                  "resource://gre/modules/SystemAppProxy.jsm");
 +// XPCOMUtils.defineLazyModuleGetter(this, "SystemAppProxy",
 +//                                   "resource://gre/modules/SystemAppProxy.jsm");
-+
-+XPCOMUtils.defineLazyServiceGetter(this, "gServiceWorkerManager",
-+                                  "@mozilla.org/serviceworkers/manager;1",
-+                                  "nsIServiceWorkerManager");
-+
-+function debug(aMsg) {
-+  //dump("AboutServiceWorkers - " + aMsg + "\n");
-+}
-+
-+function serializeServiceWorkerInfo(aServiceWorkerInfo) {
-+  if (!aServiceWorkerInfo) {
-+    throw new Error("Invalid service worker information");
-+  }
-+
-+  let result = {};
-+
-+  Object.keys(aServiceWorkerInfo).forEach(property => {
-+    if (typeof aServiceWorkerInfo[property] == "function") {
-+      return;
-+    }
-+    if (property === "principal") {
-+      result.principal = {
-+        origin: aServiceWorkerInfo.principal.origin,
-+        originAttributes: aServiceWorkerInfo.principal.originAttributes
-+      };
-+      return;
-+    }
-+    result[property] = aServiceWorkerInfo[property];
-+  });
-+
-+  return result;
-+}
-+
-+
-+this.AboutServiceWorkers = {
-+  get enabled() {
-+    if (this._enabled) {
-+      return this._enabled;
-+    }
-+    this._enabled = false;
-+    try {
-+      this._enabled = Services.prefs.getBoolPref("dom.serviceWorkers.enabled");
-+    } catch(e) {}
-+    return this._enabled;
-+  },
-+
-+  init: function() {
+ 
+ XPCOMUtils.defineLazyServiceGetter(this, "gServiceWorkerManager",
+                                   "@mozilla.org/serviceworkers/manager;1",
+                                   "nsIServiceWorkerManager");
+ 
+ function debug(aMsg) {
+-  // dump("AboutServiceWorkers - " + aMsg + "\n");
++  dump("AboutServiceWorkers - " + aMsg + "\n");
+ }
+ 
+ function serializeServiceWorkerInfo(aServiceWorkerInfo) {
+   if (!aServiceWorkerInfo) {
+     throw new Error("Invalid service worker information");
+   }
+ 
+   let result = {};
+@@ -55,32 +55,32 @@ this.AboutServiceWorkers = {
+     this._enabled = false;
+     try {
+       this._enabled = Services.prefs.getBoolPref("dom.serviceWorkers.enabled");
+     } catch(e) {}
+     return this._enabled;
+   },
+ 
+   init: function() {
+-    SystemAppProxy.addEventListener("mozAboutServiceWorkersContentEvent",
+-                                    AboutServiceWorkers);
 +    // SystemAppProxy.addEventListener("mozAboutServiceWorkersContentEvent",
 +    //                                 AboutServiceWorkers);
-+  },
-+
-+  sendResult: function(aId, aResult) {
+   },
+ 
+   sendResult: function(aId, aResult) {
+-    SystemAppProxy._sendCustomEvent("mozAboutServiceWorkersChromeEvent", {
+-      id: aId,
+-      result: aResult
+-    });
 +    // SystemAppProxy._sendCustomEvent("mozAboutServiceWorkersChromeEvent", {
 +    //   id: aId,
 +    //   result: aResult
 +    // });
-+  },
-+
-+  sendError: function(aId, aError) {
+   },
+ 
+   sendError: function(aId, aError) {
+-    SystemAppProxy._sendCustomEvent("mozAboutServiceWorkersChromeEvent", {
+-      id: aId,
+-      error: aError
+-    });
 +    // SystemAppProxy._sendCustomEvent("mozAboutServiceWorkersChromeEvent", {
 +    //   id: aId,
 +    //   error: aError
 +    // });
-+  },
-+
-+  handleEvent: function(aEvent) {
-+    let message = aEvent.detail;
-+
-+    debug("Got content event " + JSON.stringify(message));
-+
-+    if (!message.id || !message.name) {
-+      dump("Invalid event " + JSON.stringify(message) + "\n");
-+      return;
-+    }
-+
-+    let self = AboutServiceWorkers;
-+
-+    switch(message.name) {
-+      case "init":
-+        if (!self.enabled) {
-+          self.sendResult(message.id, {
-+            enabled: false,
-+            registrations: []
-+          });
-+          return;
-+        };
-+
-+        let data = gServiceWorkerManager.getAllRegistrations();
-+        if (!data) {
-+          self.sendError(message.id, "NoServiceWorkersRegistrations");
-+          return;
-+        }
-+
-+        let registrations = [];
-+
-+        for (let i = 0; i < data.length; i++) {
-+          let info = data.queryElementAt(i, Ci.nsIServiceWorkerInfo);
-+          if (!info) {
-+            dump("AboutServiceWorkers: Invalid nsIServiceWorkerInfo " +
-+                 "interface.\n");
-+            continue;
-+          }
-+          registrations.push(serializeServiceWorkerInfo(info));
-+        }
-+
-+        self.sendResult(message.id, {
-+          enabled: self.enabled,
-+          registrations: registrations
-+        });
-+        break;
-+
-+      case "update":
-+        if (!message.scope) {
-+          self.sendError(message.id, "MissingScope");
-+          return;
-+        }
-+
-+        if (!message.principal ||
-+            !message.principal.originAttributes) {
-+          // XXX This will always error until bug 1171915 is fixed.
-+          self.sendError(message.id, "MissingOriginAttributes");
-+          return;
-+        }
-+
-+        gServiceWorkerManager.propagateSoftUpdate(message.principal.originAttributes,
-+                                                  message.scope);
-+        self.sendResult(message.id, true);
-+        break;
-+
-+      case "unregister":
-+        if (!message.principal ||
-+            !message.principal.origin ||
-+            !message.principal.appId) {
-+          self.sendError("MissingPrincipal");
-+          return;
-+        }
-+
-+        let principal = Services.scriptSecurityManager.getAppCodebasePrincipal(
-+          Services.io.newURI(message.principal.origin, null, null),
-+          message.principal.appId,
-+          message.principal.isInBrowser
-+        );
-+
-+        if (!message.scope) {
-+          self.sendError("MissingScope");
-+          return;
-+        }
-+
-+        let serviceWorkerUnregisterCallback = {
-+          unregisterSucceeded: function() {
-+            self.sendResult(message.id, true);
-+          },
-+
-+          unregisterFailed: function() {
-+            self.sendError(message.id, "UnregisterError");
-+          },
-+
-+          QueryInterface: XPCOMUtils.generateQI([
-+            Ci.nsIServiceWorkerUnregisterCallback
-+          ])
-+        };
-+        gServiceWorkerManager.propagateUnregister(principal,
-+                                                  serviceWorkerUnregisterCallback,
-+                                                  message.scope);
-+        break;
-+    }
-+  }
-+};
-+
-+AboutServiceWorkers.init();
+   },
+ 
+   handleEvent: function(aEvent) {
+     let message = aEvent.detail;
+ 
+     debug("Got content event " + JSON.stringify(message));
+ 
+     if (!message.id || !message.name) {
 diff --git a/browser/components/moz.build b/browser/components/moz.build
 --- a/browser/components/moz.build
 +++ b/browser/components/moz.build
@@ -558,16 +467,39 @@ diff --git a/browser/components/moz.build b/browser/components/moz.build
  
  with Files('controlcenter/**'):
      BUG_COMPONENT = ('Firefox', 'General')
+diff --git a/browser/components/test/app/client.html b/browser/components/test/app/client.html
+new file mode 100644
+--- /dev/null
++++ b/browser/components/test/app/client.html
+@@ -0,0 +1,17 @@
++<!DOCTYPE HTML>
++<html>
++  <head>
++    <title>Test app for bug 1171917</title>
++    <script type='application/javascript;version=1.7'>
++
++function onLoad() {
++  navigator.serviceWorker.ready.then(function(swr) {
++    parent.postMessage({status: "callback", data: "ready"}, '*');
++  });
++}
++
++    </script>
++  </head>
++  <body onload='onLoad()'>
++  </body>
++</html>
 diff --git a/browser/components/test/app/index.html b/browser/components/test/app/index.html
 new file mode 100644
 --- /dev/null
 +++ b/browser/components/test/app/index.html
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,73 @@
 +<!DOCTYPE html>
 +<html>
 +  <head>
 +    <title>Test app for bug 1171917</title>
 +    <script type='application/javascript;version=1.7'>
++
 +function ok(aCondition, aMessage) {
 +  if (aCondition) {
 +    alert('OK: ' + aMessage);
@@ -576,29 +508,60 @@ new file mode 100644
 +  }
 +}
 +
-+function ready() {
-+  alert('READY');
++function next() {
++  alert('NEXT');
 +}
 +
-+function registerServiceWorker() {
-+  return new Promise((resolve, reject) => {
-+    navigator.serviceWorker.ready.then(() => {
-+      ready();
-+      resolve();
-+    });
-+    navigator.serviceWorker.register('sw.sjs', {scope: '.'})
-+    .then(registration => {
-+      ok(true, 'service worker registered');
-+    })
-+    .catch(reject);
++function testFrame(src) {
++  return new Promise(function(resolve, reject) {
++    var iframe = document.createElement("iframe");
++    iframe.src = src;
++    window.onmessage = function(e) {
++      if (e.data.status == "callback") {
++        window.onmessage = null;
++        var result = e.data.data;
++        iframe.src = "about:blank";
++        document.body.removeChild(iframe);
++        iframe = null;
++        resolve(result);
++      }
++    };
++    document.body.appendChild(iframe);
 +  });
 +}
 +
-+function runTests() {
-+  return Promise.resolve()
-+    .then(registerServiceWorker)
-+    .then(ready)
++function registerServiceWorker() {
++  return navigator.serviceWorker.register('sw.sjs', {scope: '.'});
 +}
++
++function runTests() {
++  var lastSeenVersion;
++  return Promise.resolve()
++    .then(function() {
++      return navigator.serviceWorker.getRegistration(".").then(function(swr) {
++        if (!swr) {
++          lastSeenVersion = 0;
++          return registerServiceWorker();
++        }
++        return testFrame('version.html').then(function(body) {
++          lastSeenVersion = parseInt(body);
++          return Promise.resolve();
++        });
++      });
++    })
++    .then(function() {
++      return testFrame('client.html');
++    })
++    .then(function() {
++      return testFrame('version.html').then(function(body) {
++        var currentVersion = parseInt(body);
++        ok(lastSeenVersion < currentVersion, "New service worker version seen");
++        return Promise.resolve();
++      });
++    })
++    .then(next);
++}
++
 +    </script>
 +  </head>
 +  <body onload='runTests()'>
@@ -624,28 +587,53 @@ diff --git a/browser/components/test/app/sw.sjs b/browser/components/test/app/sw
 new file mode 100644
 --- /dev/null
 +++ b/browser/components/test/app/sw.sjs
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,22 @@
 +function handleRequest(request, response) {
-+  let serviceWorkers = [
-+    "// empty service worker for testing active worker",
-+    "// empty service worker for testing waiting worker",
-+  ];
-+  let index = parseInt(getState("index")) || 0;
-+
-+  // This server-side JavaScript file might be requested to return more service
-+  // worker scritps than the ones we defined above. Let's respond with a 500
-+  // error code rather than empty service worker.
-+  if (index < serviceWorkers.length) {
-+    response.write(serviceWorkers[index]);
-+    dump('Returns ' + serviceWorkers[index] + '\n');
-+    index++;
-+    setState("index", index.toString());
++  var stateName = request.scheme + 'counter';
++  if (!getState(stateName)) {
++    setState(stateName, '1');
 +  } else {
-+    dump('Returns error 500 KO\n');
-+    response.setStatusLine(request.httpVersion, 500, "K0");
++    // Make sure that we pass a string value to setState!
++    setState(stateName, "" + (parseInt(getState(stateName)) + 1));
 +  }
++  response.setHeader("Content-Type", "application/javascript", false);
++  response.write(getScript(stateName));
 +}
-\ No newline at end of file
++
++function getScript(stateName) {
++  return "oninstall = function(evt) {" +
++           "evt.waitUntil(self.skipWaiting());" +
++         "}; " +
++         "onfetch = function(evt) {" +
++           "if (evt.request.url.indexOf('get-sw-version') > -1) {" +
++             "evt.respondWith(new Response('" + getState(stateName) + "'));" +
++           "}" +
++         "};";
++}
+diff --git a/browser/components/test/app/version.html b/browser/components/test/app/version.html
+new file mode 100644
+--- /dev/null
++++ b/browser/components/test/app/version.html
+@@ -0,0 +1,19 @@
++<!DOCTYPE HTML>
++<html>
++  <head>
++    <title>Test app for bug 1171917</title>
++    <script type='application/javascript;version=1.7'>
++
++function onLoad() {
++  fetch("get-sw-version").then(function(r) {
++    return r.text();
++  }).then(function(body) {
++    parent.postMessage({status: "callback", data: body}, "*");
++  });
++}
++
++    </script>
++  </head>
++  <body onload='onLoad()'>
++  </body>
++</html>
 diff --git a/browser/components/test/chrome.ini b/browser/components/test/chrome.ini
 new file mode 100644
 --- /dev/null
@@ -661,7 +649,7 @@ diff --git a/browser/components/test/test_aboutserviceworkers.html b/browser/com
 new file mode 100644
 --- /dev/null
 +++ b/browser/components/test/test_aboutserviceworkers.html
-@@ -0,0 +1,218 @@
+@@ -0,0 +1,243 @@
 +<!DOCTYPE HTML>
 +<html>
 +<!--
@@ -690,7 +678,7 @@ new file mode 100644
 +
 +SimpleTest.waitForExplicitFinish();
 +
-+<!-- const gOrigin = 'http://test/chrome/b2g/components/test/app'; -->
++<!-- const gOrigin = 'http://test/chrome/b2g/components/test/mochitest/app'; -->
 +const gOrigin = 'http://test/chrome/browser/components/test/app';
 +const appManifestURL = gOrigin + '/manifest.webapp';
 +let gApp;
@@ -699,11 +687,19 @@ new file mode 100644
 +const ORIGINAL_SENDRESULT = AboutServiceWorkers.sendResult;
 +const ORIGINAL_SENDERROR = AboutServiceWorkers.sendError;
 +
++function debug(aMsg) {
++  dump("test_aboutserviceworkers.html - " + aMsg + "\n");
++}
++
 +function mockInit() {
 +  window.addEventListener(ASW_CONTENT_EVENT, AboutServiceWorkers);
 +}
 +
 +function mockSendResult(aId, aResult) {
++  debug("mockSendResult, " + JSON.stringify({ detail : {
++    id: aId,
++    result: aResult
++  }}));
 +  let event = new CustomEvent(ASW_CHROME_EVENT, { detail : {
 +    id: aId,
 +    result: aResult
@@ -712,6 +708,10 @@ new file mode 100644
 +}
 +
 +function mockSendError(aId, aError) {
++  debug("mockSendError, " + JSON.stringify({ detail : {
++    id: aId,
++    result: aError
++  }}));
 +  let event = new CustomEvent(ASW_CHROME_EVENT, { detail: {
 +    id: aId,
 +    result: aError
@@ -754,7 +754,6 @@ new file mode 100644
 +      if (!message || !message.id || message.id != id) {
 +        return reject('InternalErrorWrongChromeEvent');
 +      }
-+      info(JSON.stringify(message));
 +
 +      if (message.error) {
 +        reject(message.error);
@@ -778,25 +777,28 @@ new file mode 100644
 +  });
 +}
 +
-+function launchApp() {
++function testApp() {
 +  if (!gApp) {
 +    ok(false, 'No test application to launch');
 +    return Promise.reject();
 +  }
 +  return new Promise((resolve, reject) => {
 +    let iframe = document.createElement('iframe');
++    let domParent = document.getElementById('container');
 +    iframe.setAttribute('mozbrowser', 'true');
 +    iframe.setAttribute('mozapp', gApp.manifestURL);
 +    iframe.addEventListener('mozbrowsershowmodalprompt', function listener(e) {
 +      let message = e.detail.message;
 +      if (/OK/.exec(message)) {
 +        ok(true, "Message from app: " + message);
-+      } else if (/READY/.exec(message)) {
++      } else if (/NEXT/.exec(message)) {
 +        ok(true, "Message from app: " + message);
++        iframe.src = "about:blank";
++        domParent.removeChild(iframe);
++        iframe = null;
 +        resolve();
 +      }
 +    }, false);
-+    let domParent = document.getElementById('container');
 +    domParent.appendChild(iframe);
 +    ok(true, "origin " +  gOrigin + gApp.manifest.launch_path);
 +    SpecialPowers.wrap(iframe.contentWindow).location =
@@ -850,20 +852,31 @@ new file mode 100644
 +function go() {
 +  setup()
 +    .then(attachMocks)
-+    .then(function (result) {
++    .then(function () {
 +      AboutServiceWorkers.init();
 +      return Promise.resolve();
 +    })
 +    .then(installApp)
-+    .then(launchApp)
-+    .then(function () {
-+      info('Send chrome request');
++    .then(testApp)
++    .then(function() {
 +      return chromeRequest({id: "0", name: "init"});
++    })
++    .then(function(result) {
++      return chromeRequest({
++        id: "1",
++        name: "update",
++        principal: result.registrations[0].principal,
++        scope: result.registrations[0].scope
++      });
++    })
++    .then(testApp)
++    .then(function() {
++      return chromeRequest({id: "2", name: "init"});
 +    })
 +    .then(uninstallApp)
 +    .then(restoreMocks)
 +    .then(SimpleTest.finish)
-+    .catch((e) => {
++    .catch(function(e) {
 +      ok(false, 'Unexpected error ' + e);
 +      SimpleTest.finish();
 +    });
@@ -880,3 +893,291 @@ new file mode 100644
 +<div id="container"></div>
 +</body>
 +</html>
+diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerManager.cpp
+--- a/dom/workers/ServiceWorkerManager.cpp
++++ b/dom/workers/ServiceWorkerManager.cpp
+@@ -927,16 +927,17 @@ public:
+   {
+     mQueue = nullptr;
+     mCanceled = true;
+   }
+ 
+   void
+   Start() override
+   {
++    printf_stderr("### ### - ServiceWorkerRegisterJob::Start()\n");
+     MOZ_ASSERT(NS_IsMainThread());
+     MOZ_ASSERT(!mCanceled);
+ 
+     nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+     if (!swm->HasBackgroundActor()) {
+       nsCOMPtr<nsIRunnable> runnable =
+         NS_NewRunnableMethod(this, &ServiceWorkerRegisterJob::Start);
+       swm->AppendPendingOperation(runnable);
+@@ -969,24 +970,26 @@ public:
+       }
+ 
+       mRegistration->mScriptSpec = mScriptSpec;
+       swm->StoreRegistration(mPrincipal, mRegistration);
+     } else {
+       MOZ_ASSERT(mJobType == UPDATE_JOB);
+     }
+ 
++    printf_stderr("### ### - ServiceWorkerRegisterJob::Start(), Update()\n");
+     Update();
+   }
+ 
+   void
+   ComparisonResult(nsresult aStatus, bool aInCacheAndEqual,
+                    const nsAString& aNewCacheName,
+                    const nsACString& aMaxScope) override
+   {
++    printf_stderr("### ### - ServiceWorkerRegisterJob::ComparationResult()\n");
+     nsRefPtr<ServiceWorkerRegisterJob> kungFuDeathGrip = this;
+     if (mCanceled) {
+       Fail(NS_ERROR_DOM_TYPE_ERR);
+       return;
+     }
+ 
+     if (NS_WARN_IF(NS_FAILED(aStatus))) {
+       Fail(NS_ERROR_DOM_TYPE_ERR);
+@@ -1203,16 +1206,17 @@ private:
+     NS_DispatchToMainThread(r);
+   }
+ 
+   // Aspects of (actually the whole algorithm) of [[Update]] after
+   // "Run the following steps in parallel."
+   void
+   ContinueUpdate()
+   {
++    printf_stderr("### ### - ServiceWorkerRegisterJob::ContinueUpdate()\n");
+     AssertIsOnMainThread();
+     nsRefPtr<ServiceWorkerRegisterJob> kungFuDeathGrip = this;
+     if (mCanceled) {
+       return Fail(NS_ERROR_DOM_ABORT_ERR);
+     }
+ 
+     if (mRegistration->mInstallingWorker) {
+       // FIXME(nsm): "Terminate installing worker".
+@@ -3016,27 +3020,30 @@ ServiceWorkerManager::FindScopeForPath(c
+   return false;
+ }
+ 
+ #ifdef DEBUG
+ /* static */ bool
+ ServiceWorkerManager::HasScope(nsIPrincipal* aPrincipal,
+                                const nsACString& aScope)
+ {
++  return true;
+   nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+   MOZ_ASSERT(swm);
+ 
+   nsAutoCString scopeKey;
+   nsresult rv = PrincipalToScopeKey(aPrincipal, scopeKey);
+   if (NS_WARN_IF(NS_FAILED(rv))) {
++    printf_stderr("### ### - ServiceWorkerManager::HasScope(), PrincipalToScopeKey false\n");
+     return false;
+   }
+ 
+   RegistrationDataPerPrincipal* data;
+   if (!swm->mRegistrationInfos.Get(scopeKey, &data)) {
++    printf_stderr("### ### - ServiceWorkerManager::HasScope(), !swm->mRegistrationInfos.Get false\n");
+     return false;
+   }
+ 
+   return data->mOrderedScopes.Contains(aScope);
+ }
+ #endif
+ 
+ /* static */ void
+@@ -3841,37 +3848,42 @@ ServiceWorkerManager::SoftUpdate(const O
+   aOriginAttributes.CreateSuffix(scopeKey);
+   SoftUpdate(scopeKey, aScope);
+ }
+ 
+ void
+ ServiceWorkerManager::SoftUpdate(const nsACString& aScopeKey,
+                                  const nsACString& aScope)
+ {
++  printf_stderr("### ### - ServiceWorkerManager::SoftUpdate()\n");
+   nsRefPtr<ServiceWorkerRegistrationInfo> registration =
+     GetRegistration(aScopeKey, aScope);
+   if (NS_WARN_IF(!registration)) {
++    printf_stderr("### ### - ServiceWorkerManager::SoftUpdate() 1\n");
+     return;
+   }
+ 
+   // "If registration's uninstalling flag is set, abort these steps."
+   if (registration->mPendingUninstall) {
++    printf_stderr("### ### - ServiceWorkerManager::SoftUpdate() 2\n");
+     return;
+   }
+ 
+   // "If registration's installing worker is not null, abort these steps."
+   if (registration->mInstallingWorker) {
++    printf_stderr("### ### - ServiceWorkerManager::SoftUpdate() 3\n");
+     return;
+   }
+ 
+   // "Let newestWorker be the result of running Get Newest Worker algorithm
+   // passing registration as its argument.
+   // If newestWorker is null, abort these steps."
+   nsRefPtr<ServiceWorkerInfo> newest = registration->Newest();
+   if (!newest) {
++    printf_stderr("### ### - ServiceWorkerManager::SoftUpdate() 4\n");
+     return;
+   }
+ 
+   // "Set registration's registering script url to newestWorker's script url."
+   registration->mScriptSpec = newest->ScriptSpec();
+ 
+   ServiceWorkerJobQueue* queue =
+     GetOrCreateJobQueue(aScopeKey, aScope);
+@@ -4676,40 +4688,44 @@ ServiceWorkerManager::Observe(nsISupport
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ ServiceWorkerManager::PropagateSoftUpdate(JS::Handle<JS::Value> aOriginAttributes,
+                                           const nsAString& aScope,
+                                           JSContext* aCx)
+ {
++  printf_stderr("### ### - ServiceWorkerManager::PropagateSoftUpdate()\n");
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+   OriginAttributes attrs;
+   if (!aOriginAttributes.isObject() || !attrs.Init(aCx, aOriginAttributes)) {
+     return NS_ERROR_INVALID_ARG;
+   }
+ 
+   PropagateSoftUpdate(attrs, aScope);
+   return NS_OK;
+ }
+ 
+ void
+ ServiceWorkerManager::PropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
+                                           const nsAString& aScope)
+ {
++  printf_stderr("### ### - ServiceWorkerManager::PropagateSoftUpdate()\n");
+   MOZ_ASSERT(NS_IsMainThread());
+ 
+   if (!mActor) {
++    printf_stderr("### ### - ServiceWorkerManager::PropagateSoftUpdate(), no actor\n");
+     nsRefPtr<nsIRunnable> runnable =
+       new PropagateSoftUpdateRunnable(aOriginAttributes, aScope);
+     AppendPendingOperation(runnable);
+     return;
+   }
+ 
++  printf_stderr("### ### - ServiceWorkerManager::PropagateSoftUpdate(), actor\n");
+   mActor->SendPropagateSoftUpdate(aOriginAttributes, nsString(aScope));
+ }
+ 
+ NS_IMETHODIMP
+ ServiceWorkerManager::PropagateUnregister(nsIPrincipal* aPrincipal,
+                                           nsIServiceWorkerUnregisterCallback* aCallback,
+                                           const nsAString& aScope)
+ {
+diff --git a/dom/workers/ServiceWorkerManagerChild.cpp b/dom/workers/ServiceWorkerManagerChild.cpp
+--- a/dom/workers/ServiceWorkerManagerChild.cpp
++++ b/dom/workers/ServiceWorkerManagerChild.cpp
+@@ -30,16 +30,17 @@ ServiceWorkerManagerChild::RecvNotifyReg
+   return true;
+ }
+ 
+ bool
+ ServiceWorkerManagerChild::RecvNotifySoftUpdate(
+                                       const OriginAttributes& aOriginAttributes,
+                                       const nsString& aScope)
+ {
++  printf_stderr("### ### - ServiceWorkerManagerChild::RecvNotifySoftUpdate()\n");
+   if (mShuttingDown) {
+     return true;
+   }
+ 
+   nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+   MOZ_ASSERT(swm);
+ 
+   swm->SoftUpdate(aOriginAttributes, NS_ConvertUTF16toUTF8(aScope));
+diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWorkerManagerParent.cpp
+--- a/dom/workers/ServiceWorkerManagerParent.cpp
++++ b/dom/workers/ServiceWorkerManagerParent.cpp
+@@ -227,16 +227,17 @@ ServiceWorkerManagerParent::RecvUnregist
+ 
+   return true;
+ }
+ 
+ bool
+ ServiceWorkerManagerParent::RecvPropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
+                                                     const nsString& aScope)
+ {
++  printf_stderr("### ### - ServiceWorkerManagerParent::RecvPropagateSoftUpdate()\n");
+   AssertIsOnBackgroundThread();
+ 
+   if (NS_WARN_IF(!mService)) {
+     return false;
+   }
+ 
+   mService->PropagateSoftUpdate(mID, aOriginAttributes, aScope);
+   return true;
+diff --git a/dom/workers/ServiceWorkerManagerService.cpp b/dom/workers/ServiceWorkerManagerService.cpp
+--- a/dom/workers/ServiceWorkerManagerService.cpp
++++ b/dom/workers/ServiceWorkerManagerService.cpp
+@@ -156,27 +156,35 @@ struct MOZ_STACK_CLASS SoftUpdateData fi
+ #ifdef DEBUG
+   bool mParentFound;
+ #endif
+ };
+ 
+ PLDHashOperator
+ SoftUpdateEnumerator(nsPtrHashKey<ServiceWorkerManagerParent>* aKey, void* aPtr)
+ {
++  printf_stderr("### ### - SoftUpdateEnumerator()\n");
+   AssertIsOnBackgroundThread();
+ 
+   auto* data = static_cast<SoftUpdateData*>(aPtr);
+   ServiceWorkerManagerParent* parent = aKey->GetKey();
+   MOZ_ASSERT(parent);
+ 
+-  if (parent->ID() != data->mParentID) {
+-    unused <<parent->SendNotifySoftUpdate(data->mOriginAttributes,
+-                                          data->mScope);
++//   if (parent->ID() != data->mParentID) {
++//     unused <<parent->SendNotifySoftUpdate(data->mOriginAttributes,
++//                                           data->mScope);
++// #ifdef DEBUG
++//   } else {
++//     data->mParentFound = true;
++// #endif
++//   }
++  unused <<parent->SendNotifySoftUpdate(data->mOriginAttributes,
++                                        data->mScope);
+ #ifdef DEBUG
+-  } else {
++  if (parent->ID() == data->mParentID) {
+     data->mParentFound = true;
+ #endif
+   }
+ 
+   return PL_DHASH_NEXT;
+ }
+ 
+ struct MOZ_STACK_CLASS UnregisterData final
+@@ -332,16 +340,17 @@ ServiceWorkerManagerService::PropagateRe
+ }
+ 
+ void
+ ServiceWorkerManagerService::PropagateSoftUpdate(
+                                       uint64_t aParentID,
+                                       const OriginAttributes& aOriginAttributes,
+                                       const nsAString& aScope)
+ {
++  printf_stderr("### ### - ServiceWorkerManagerService::PropagateSoftUpdate()\n");
+   AssertIsOnBackgroundThread();
+ 
+   SoftUpdateData data(aOriginAttributes, aScope, aParentID);
+   mAgents.EnumerateEntries(SoftUpdateEnumerator, &data);
+ 
+ #ifdef DEBUG
+   MOZ_ASSERT(data.mParentFound);
+ #endif
