@@ -1,7 +1,7 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  eaf4f9b45117a36aa46e3e770ff2bff52dda1282
-Bug 1171917 - Improve about:serviceworkers tests on b2g. r=baku,fabrice
+# Parent  48c51b88a126036eff6a82e576d818c96546a09a
+Bug 1171917 - Improve about:serviceworkers tests on b2g. r=ferjm
 
 diff --git a/b2g/components/AboutServiceWorkers.jsm b/b2g/components/AboutServiceWorkers.jsm
 --- a/b2g/components/AboutServiceWorkers.jsm
@@ -25,16 +25,39 @@ diff --git a/b2g/components/AboutServiceWorkers.jsm b/b2g/components/AboutServic
    }
  
    let result = {};
+diff --git a/b2g/components/test/mochitest/app/client.html b/b2g/components/test/mochitest/app/client.html
+new file mode 100644
+--- /dev/null
++++ b/b2g/components/test/mochitest/app/client.html
+@@ -0,0 +1,17 @@
++<!DOCTYPE HTML>
++<html>
++  <head>
++    <title>Test app for bug 1171917</title>
++    <script type='application/javascript;version=1.7'>
++
++function onLoad() {
++  navigator.serviceWorker.ready.then(function(swr) {
++    parent.postMessage({status: "callback", data: "ready"}, '*');
++  });
++}
++
++    </script>
++  </head>
++  <body onload='onLoad()'>
++  </body>
++</html>
 diff --git a/b2g/components/test/mochitest/app/index.html b/b2g/components/test/mochitest/app/index.html
 new file mode 100644
 --- /dev/null
 +++ b/b2g/components/test/mochitest/app/index.html
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,77 @@
 +<!DOCTYPE html>
 +<html>
 +  <head>
 +    <title>Test app for bug 1171917</title>
 +    <script type='application/javascript;version=1.7'>
++
 +function ok(aCondition, aMessage) {
 +  if (aCondition) {
 +    alert('OK: ' + aMessage);
@@ -43,29 +66,64 @@ new file mode 100644
 +  }
 +}
 +
-+function ready() {
-+  alert('READY');
++function done() {
++  alert('DONE');
 +}
 +
-+function registerServiceWorker() {
-+  return new Promise((resolve, reject) => {
-+    navigator.serviceWorker.ready.then(() => {
-+      ready();
-+      resolve();
-+    });
-+    navigator.serviceWorker.register('sw.js', {scope: '.'})
-+    .then(registration => {
-+      ok(true, 'service worker registered');
-+    })
-+    .catch(reject);
++function testFrame(src) {
++  return new Promise(function(resolve, reject) {
++    var iframe = document.createElement("iframe");
++    iframe.src = src;
++    window.onmessage = function(e) {
++      if (e.data.status == "callback") {
++        window.onmessage = null;
++        var result = e.data.data;
++        iframe.src = "about:blank";
++        document.body.removeChild(iframe);
++        iframe = null;
++        resolve(result);
++      }
++    };
++    document.body.appendChild(iframe);
 +  });
 +}
 +
-+function runTests() {
-+  return Promise.resolve()
-+    .then(registerServiceWorker)
-+    .then(ready)
++function registerServiceWorker() {
++  return navigator.serviceWorker.register('sw.sjs', {scope: '.'});
 +}
++
++function runTests() {
++  var lastSeenVersion;
++  return Promise.resolve()
++    .then(function() {
++      // Check whether the service worker is already registered and save its
++      // version.
++      return navigator.serviceWorker.getRegistration(".").then(function(swr) {
++        if (!swr) {
++          lastSeenVersion = 0;
++          return registerServiceWorker();
++        }
++        return testFrame('version.html').then(function(body) {
++          lastSeenVersion = parseInt(body);
++          return Promise.resolve();
++        });
++      });
++    })
++    .then(function() {
++      // Wait until the service worker start controlling the client.
++      return testFrame('client.html');
++    })
++    .then(function() {
++      // Fetch current version. It should be greater than the last seen version.
++      return testFrame('version.html').then(function(body) {
++        var currentVersion = parseInt(body);
++        ok(lastSeenVersion < currentVersion, "New service worker version seen");
++        return Promise.resolve();
++      });
++    })
++    .then(done);
++}
++
 +    </script>
 +  </head>
 +  <body onload='runTests()'>
@@ -87,12 +145,57 @@ new file mode 100644
 +++ b/b2g/components/test/mochitest/app/manifest.webapp^headers^
 @@ -0,0 +1,1 @@
 +Content-Type: application/manifest+json
-diff --git a/b2g/components/test/mochitest/app/sw.js b/b2g/components/test/mochitest/app/sw.js
+diff --git a/b2g/components/test/mochitest/app/sw.sjs b/b2g/components/test/mochitest/app/sw.sjs
 new file mode 100644
 --- /dev/null
-+++ b/b2g/components/test/mochitest/app/sw.js
-@@ -0,0 +1,1 @@
-+// Useless service worker.
++++ b/b2g/components/test/mochitest/app/sw.sjs
+@@ -0,0 +1,22 @@
++function handleRequest(request, response) {
++  var stateName = request.scheme + 'counter';
++  if (!getState(stateName)) {
++    setState(stateName, '1');
++  } else {
++    // Make sure that we pass a string value to setState!
++    setState(stateName, "" + (parseInt(getState(stateName)) + 1));
++  }
++  response.setHeader("Content-Type", "application/javascript", false);
++  response.write(getScript(stateName));
++}
++
++function getScript(stateName) {
++  return "oninstall = function(evt) {" +
++           "evt.waitUntil(self.skipWaiting());" +
++         "}; " +
++         "onfetch = function(evt) {" +
++           "if (evt.request.url.indexOf('get-sw-version') > -1) {" +
++             "evt.respondWith(new Response('" + getState(stateName) + "'));" +
++           "}" +
++         "};";
++}
+diff --git a/b2g/components/test/mochitest/app/version.html b/b2g/components/test/mochitest/app/version.html
+new file mode 100644
+--- /dev/null
++++ b/b2g/components/test/mochitest/app/version.html
+@@ -0,0 +1,19 @@
++<!DOCTYPE HTML>
++<html>
++  <head>
++    <title>Test app for bug 1171917</title>
++    <script type='application/javascript;version=1.7'>
++
++function onLoad() {
++  fetch("get-sw-version").then(function(r) {
++    return r.text();
++  }).then(function(body) {
++    parent.postMessage({status: "callback", data: body}, "*");
++  });
++}
++
++    </script>
++  </head>
++  <body onload='onLoad()'>
++  </body>
++</html>
 diff --git a/b2g/components/test/mochitest/chrome.ini b/b2g/components/test/mochitest/chrome.ini
 new file mode 100644
 --- /dev/null
@@ -108,7 +211,7 @@ diff --git a/b2g/components/test/mochitest/test_aboutserviceworkers.html b/b2g/c
 new file mode 100644
 --- /dev/null
 +++ b/b2g/components/test/mochitest/test_aboutserviceworkers.html
-@@ -0,0 +1,236 @@
+@@ -0,0 +1,255 @@
 +<!DOCTYPE HTML>
 +<html>
 +<!--
@@ -233,25 +336,28 @@ new file mode 100644
 +  });
 +}
 +
-+function launchApp() {
++function testApp() {
 +  if (!gApp) {
 +    ok(false, 'No test application to launch');
 +    return Promise.reject();
 +  }
 +  return new Promise((resolve, reject) => {
 +    let iframe = document.createElement('iframe');
++    let domParent = document.getElementById('container');
 +    iframe.setAttribute('mozbrowser', 'true');
 +    iframe.setAttribute('mozapp', gApp.manifestURL);
 +    iframe.addEventListener('mozbrowsershowmodalprompt', function listener(e) {
 +      let message = e.detail.message;
 +      if (/OK/.exec(message)) {
 +        ok(true, "Message from app: " + message);
-+      } else if (/READY/.exec(message)) {
++      } else if (/DONE/.exec(message)) {
 +        ok(true, "Message from app: " + message);
++        iframe.src = "about:blank";
++        domParent.removeChild(iframe);
++        iframe = null;
 +        resolve();
 +      }
 +    }, false);
-+    let domParent = document.getElementById('container');
 +    domParent.appendChild(iframe);
 +    ok(true, "origin " +  gOrigin + gApp.manifest.launch_path);
 +    SpecialPowers.wrap(iframe.contentWindow).location =
@@ -305,30 +411,46 @@ new file mode 100644
 +function go() {
 +  setup()
 +    .then(attachMocks)
-+    .then(() => {
++    .then(function () {
 +      AboutServiceWorkers.init();
 +      return Promise.resolve();
 +    })
 +    .then(installApp)
-+    .then(launchApp)
-+    .then(() => {
++    .then(testApp)
++    .then(function() {
++      return chromeRequest({id: "0", name: "init"});
++    })
++    .then(function(result) {
 +      return chromeRequest({
-+        id: "0",
-+        name: "init"
++        id: "1",
++        name: "update",
++        principal: result.registrations[0].principal,
++        scope: result.registrations[0].scope
 +      });
 +    })
-+    <!-- .then((result) => { -->
++    .then(testApp)
++    .then(function() {
++      return chromeRequest({id: "2", name: "init"});
++    })
++    <!-- .then(function(result) { -->
 +    <!--   return chromeRequest({ -->
-+    <!--     id: "1", -->
-+    <!--     name: "update", -->
++    <!--     id: "3", -->
++    <!--     name: "unregister", -->
 +    <!--     principal: result.registrations[0].principal, -->
 +    <!--     scope: result.registrations[0].scope -->
 +    <!--   }); -->
 +    <!-- }) -->
++    <!-- .then(function() { -->
++    <!--   return chromeRequest({id: "4", name: "init"}); -->
++    <!-- }) -->
++    <!-- .then(function(result) { -->
++    <!--   ok(result.registrations && result.registrations.length === 0, -->
++    <!--      "Service worker registration was successfuly unregistered"); -->
++    <!-- }) -->
 +    .then(uninstallApp)
 +    .then(restoreMocks)
 +    .then(SimpleTest.finish)
-+    .catch((e) => {
++    .catch(function(e) {
 +      ok(false, 'Unexpected error ' + e);
 +      SimpleTest.finish();
 +    });
@@ -493,7 +615,7 @@ diff --git a/browser/components/test/app/index.html b/browser/components/test/ap
 new file mode 100644
 --- /dev/null
 +++ b/browser/components/test/app/index.html
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,77 @@
 +<!DOCTYPE html>
 +<html>
 +  <head>
@@ -508,8 +630,8 @@ new file mode 100644
 +  }
 +}
 +
-+function next() {
-+  alert('NEXT');
++function done() {
++  alert('DONE');
 +}
 +
 +function testFrame(src) {
@@ -538,6 +660,8 @@ new file mode 100644
 +  var lastSeenVersion;
 +  return Promise.resolve()
 +    .then(function() {
++      // Check whether the service worker is already registered and save its
++      // version.
 +      return navigator.serviceWorker.getRegistration(".").then(function(swr) {
 +        if (!swr) {
 +          lastSeenVersion = 0;
@@ -550,16 +674,18 @@ new file mode 100644
 +      });
 +    })
 +    .then(function() {
++      // Wait until the service worker start controlling the client.
 +      return testFrame('client.html');
 +    })
 +    .then(function() {
++      // Fetch current version. It should be greater than the last seen version.
 +      return testFrame('version.html').then(function(body) {
 +        var currentVersion = parseInt(body);
 +        ok(lastSeenVersion < currentVersion, "New service worker version seen");
 +        return Promise.resolve();
 +      });
 +    })
-+    .then(next);
++    .then(done);
 +}
 +
 +    </script>
@@ -649,7 +775,7 @@ diff --git a/browser/components/test/test_aboutserviceworkers.html b/browser/com
 new file mode 100644
 --- /dev/null
 +++ b/browser/components/test/test_aboutserviceworkers.html
-@@ -0,0 +1,243 @@
+@@ -0,0 +1,258 @@
 +<!DOCTYPE HTML>
 +<html>
 +<!--
@@ -791,7 +917,7 @@ new file mode 100644
 +      let message = e.detail.message;
 +      if (/OK/.exec(message)) {
 +        ok(true, "Message from app: " + message);
-+      } else if (/NEXT/.exec(message)) {
++      } else if (/DONE/.exec(message)) {
 +        ok(true, "Message from app: " + message);
 +        iframe.src = "about:blank";
 +        domParent.removeChild(iframe);
@@ -873,6 +999,21 @@ new file mode 100644
 +    .then(function() {
 +      return chromeRequest({id: "2", name: "init"});
 +    })
++    <!-- .then(function(result) { -->
++    <!--   return chromeRequest({ -->
++    <!--     id: "3", -->
++    <!--     name: "unregister", -->
++    <!--     principal: result.registrations[0].principal, -->
++    <!--     scope: result.registrations[0].scope -->
++    <!--   }); -->
++    <!-- }) -->
++    <!-- .then(function() { -->
++    <!--   return chromeRequest({id: "4", name: "init"}); -->
++    <!-- }) -->
++    <!-- .then(function(result) { -->
++    <!--   ok(result.registrations && result.registrations.length === 0, -->
++    <!--      "Service worker registration was successfuly unregistered"); -->
++    <!-- }) -->
 +    .then(uninstallApp)
 +    .then(restoreMocks)
 +    .then(SimpleTest.finish)
@@ -990,7 +1131,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  #endif
  
  /* static */ void
-@@ -3841,37 +3848,42 @@ ServiceWorkerManager::SoftUpdate(const O
+@@ -3843,37 +3850,42 @@ ServiceWorkerManager::SoftUpdate(const O
    aOriginAttributes.CreateSuffix(scopeKey);
    SoftUpdate(scopeKey, aScope);
  }
@@ -1033,7 +1174,7 @@ diff --git a/dom/workers/ServiceWorkerManager.cpp b/dom/workers/ServiceWorkerMan
  
    ServiceWorkerJobQueue* queue =
      GetOrCreateJobQueue(aScopeKey, aScope);
-@@ -4676,40 +4688,44 @@ ServiceWorkerManager::Observe(nsISupport
+@@ -4678,40 +4690,44 @@ ServiceWorkerManager::Observe(nsISupport
    return NS_OK;
  }
  
@@ -1123,7 +1264,7 @@ diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWor
 diff --git a/dom/workers/ServiceWorkerManagerService.cpp b/dom/workers/ServiceWorkerManagerService.cpp
 --- a/dom/workers/ServiceWorkerManagerService.cpp
 +++ b/dom/workers/ServiceWorkerManagerService.cpp
-@@ -156,27 +156,35 @@ struct MOZ_STACK_CLASS SoftUpdateData fi
+@@ -156,30 +156,38 @@ struct MOZ_STACK_CLASS SoftUpdateData fi
  #ifdef DEBUG
    bool mParentFound;
  #endif
@@ -1156,13 +1297,17 @@ diff --git a/dom/workers/ServiceWorkerManagerService.cpp b/dom/workers/ServiceWo
 -  } else {
 +  if (parent->ID() == data->mParentID) {
      data->mParentFound = true;
++  }
  #endif
-   }
+-  }
  
    return PL_DHASH_NEXT;
  }
  
  struct MOZ_STACK_CLASS UnregisterData final
+ {
+   UnregisterData(const PrincipalInfo& aPrincipalInfo,
+                  const nsAString& aScope,
 @@ -332,16 +340,17 @@ ServiceWorkerManagerService::PropagateRe
  }
  

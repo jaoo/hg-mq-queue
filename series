@@ -1,4 +1,5 @@
-1171917.patch
 enable-sw-b2g.patch
-swr-gone-test.patch
+1179161.patch
+1171917.patch
+1175949-debug.patch
 try.patch

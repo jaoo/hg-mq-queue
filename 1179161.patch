@@ -1,0 +1,36 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  4fbba23434d025f57987a06da3d8f14bc5174af6
+Bug 1179161 - originAttributes does not have such isInBrowser member (follow-up bug 1171915). r=ferjm
+
+diff --git a/b2g/components/AboutServiceWorkers.jsm b/b2g/components/AboutServiceWorkers.jsm
+--- a/b2g/components/AboutServiceWorkers.jsm
++++ b/b2g/components/AboutServiceWorkers.jsm
+@@ -144,25 +144,25 @@ this.AboutServiceWorkers = {
+         self.sendResult(message.id, true);
+         break;
+ 
+       case "unregister":
+         if (!message.principal ||
+             !message.principal.origin ||
+             !message.principal.originAttributes ||
+             !message.principal.originAttributes.appId ||
+-            !message.principal.originAttributes.isInBrowser) {
++            (message.principal.originAttributes.inBrowser == null)) {
+           self.sendError(message.id, "MissingPrincipal");
+           return;
+         }
+ 
+         let principal = Services.scriptSecurityManager.getAppCodebasePrincipal(
+           Services.io.newURI(message.principal.origin, null, null),
+           message.principal.originAttributes.appId,
+-          message.principal.originAttributes.isInBrowser
++          message.principal.originAttributes.inBrowser
+         );
+ 
+         if (!message.scope) {
+           self.sendError(message.id, "MissingScope");
+           return;
+         }
+ 
+         let serviceWorkerUnregisterCallback = {

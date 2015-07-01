@@ -1,0 +1,87 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  b3055215df8b4dff7fb86a7e0f0d1df63578e568
+Bug 1175949 - Removing SW registered by packaged pre-installed app via about:serviceworkers in b2g crashes Settings/System app
+
+diff --git a/dom/ipc/AppProcessChecker.cpp b/dom/ipc/AppProcessChecker.cpp
+--- a/dom/ipc/AppProcessChecker.cpp
++++ b/dom/ipc/AppProcessChecker.cpp
+@@ -190,32 +190,37 @@ AssertAppProcess(PHalParent* aActor,
+ {
+   return AssertAppProcess(aActor->Manager(), aType, aCapability);
+ }
+ 
+ bool
+ AssertAppPrincipal(PContentParent* aActor,
+                    nsIPrincipal* aPrincipal)
+ {
++  printf_stderr("### ### - AssertAppPrincipal(), start\n");
+   if (!aPrincipal) {
+     NS_WARNING("Principal is invalid, killing app process");
+     static_cast<ContentParent*>(aActor)->KillHard("AssertAppPrincipal");
+     return false;
+   }
+ 
+   uint32_t principalAppId = aPrincipal->GetAppId();
++  printf_stderr("### ### - AssertAppPrincipal(), principalAppId %u\n", principalAppId);
+   bool inBrowserElement = aPrincipal->GetIsInBrowserElement();
++  printf_stderr("### ### - AssertAppPrincipal(), inBrowserElement %s\n", inBrowserElement ? "true" : "false");
+ 
+   // Check if the permission's appId matches a child we manage.
+   nsTArray<TabContext> contextArray =
+     static_cast<ContentParent*>(aActor)->GetManagedTabContext();
+   for (uint32_t i = 0; i < contextArray.Length(); ++i) {
++    printf_stderr("### ### - AssertAppPrincipal(), contextArray[i].OwnOrContainingAppId() %u\n", contextArray[i].OwnOrContainingAppId());
+     if (contextArray[i].OwnOrContainingAppId() == principalAppId) {
+       // If the child only runs inBrowserElement content and the principal claims
+       // it's not in a browser element, it's lying.
++      printf_stderr("### ### - AssertAppPrincipal(), contextArray[i].IsBrowserElement() %s\n", contextArray[i].IsBrowserElement() ? "true" : "false");
+       if (!contextArray[i].IsBrowserElement() || inBrowserElement) {
+         return true;
+       }
+       break;
+     }
+   }
+ 
+   NS_WARNING("Principal is invalid, killing app process");
+diff --git a/dom/workers/ServiceWorkerManagerParent.cpp b/dom/workers/ServiceWorkerManagerParent.cpp
+--- a/dom/workers/ServiceWorkerManagerParent.cpp
++++ b/dom/workers/ServiceWorkerManagerParent.cpp
+@@ -116,17 +116,19 @@ public:
+     MOZ_ASSERT(mCallback);
+     MOZ_ASSERT(mBackgroundThread);
+   }
+ 
+   NS_IMETHODIMP Run()
+   {
+     if (NS_IsMainThread()) {
+       nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo);
++      printf_stderr("### ### - CheckPrincipalWithCallbackRunnable::Run(), AssertAppPrincipal call\n");
+       AssertAppPrincipal(mContentParent, principal);
++      printf_stderr("### ### - CheckPrincipalWithCallbackRunnable::Run(), AssertAppPrincipal call done\n");
+       mContentParent = nullptr;
+ 
+       mBackgroundThread->Dispatch(this, NS_DISPATCH_NORMAL);
+       return NS_OK;
+     }
+ 
+     AssertIsOnBackgroundThread();
+     mCallback->Run();
+@@ -214,16 +216,17 @@ ServiceWorkerManagerParent::RecvUnregist
+     BackgroundParent::GetContentParent(Manager());
+ 
+   // If the ContentParent is null we are dealing with a same-process actor.
+   if (!parent) {
+     callback->Run();
+     return true;
+   }
+ 
++  printf_stderr("### ### - ServiceWorkerManagerParent::RecvUnregister(), new CheckPrincipalWithCallbackRunnable runnable\n");
+   nsRefPtr<CheckPrincipalWithCallbackRunnable> runnable =
+     new CheckPrincipalWithCallbackRunnable(parent.forget(), aPrincipalInfo,
+                                            callback);
+   nsresult rv = NS_DispatchToMainThread(runnable);
+   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));
+ 
+   return true;
+ }
