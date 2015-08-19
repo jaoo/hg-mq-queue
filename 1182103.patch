@@ -1,0 +1,636 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  0876695d1abdeb363a780bda8b6cc84f20ba51c9
+Bug 1182103 - Test EventSource scenarios with fetch interception
+
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource.resource b/dom/workers/test/serviceworkers/eventsource/eventsource.resource
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource.resource
+@@ -0,0 +1,22 @@
++:this file must be enconded in utf8
++:and its Content-Type must be equal to text/event-stream
++
++retry:500
++data: 2
++unknow: unknow
++
++event: other_event_name
++retry:500
++data: 2
++unknow: unknow
++
++event: click
++retry:500
++
++event: blur
++retry:500
++
++event:keypress
++retry:500
++
++
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource.resource^headers^ b/dom/workers/test/serviceworkers/eventsource/eventsource.resource^headers^
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource.resource^headers^
+@@ -0,0 +1,3 @@
++Content-Type: text/event-stream
++Cache-Control: no-cache, must-revalidate
++Access-Control-Allow-Origin: *
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_cors_response.html b/dom/workers/test/serviceworkers/eventsource/eventsource_cors_response.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource_cors_response.html
+@@ -0,0 +1,75 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1182103 - Test EventSource scenarios with fetch interception</title>
++  <script type="text/javascript">
++
++  var prefix = "http://mochi.test:8888/tests/dom/workers/test/serviceworkers/eventsource/";
++
++  function ok(aCondition, aMessage) {
++    parent.postMessage({status: "callback", data: "ok", condition: aCondition, message: aMessage}, "*");
++  }
++
++  function doUnregister() {
++    navigator.serviceWorker.getRegistration().then(swr => {
++      swr.unregister().then(function(result) {
++        ok(result, "Unregister should return true.");
++        parent.postMessage({status: "callback", data: "done"}, "*");
++      }, function(e) {
++        ok(false, "Unregistering the SW failed with " + e);
++      });
++    });
++  }
++
++  function doEventSource() {
++    var source = new EventSource(prefix + "eventsource.resource");
++    source.onmessage = function(e) {
++      source.onmessage = null;
++      source.close();
++      ok(true, "EventSource should work with cors responses");
++      doUnregister();
++    };
++    source.onerror = function(error) {
++      source.onmessage = null;
++      source.close();
++      ok(false, "Something went wrong");
++    };
++  }
++
++  function onLoad() {
++    if (!parent) {
++      dump("eventsource/eventsource_cors_response.html shouldn't be launched directly!");
++    }
++
++    window.addEventListener("message", function onMessage(e) {
++      if (e.data.status === "callback") {
++        switch(e.data.data) {
++          case "eventsource":
++            doEventSource();
++            window.removeEventListener("message", onMessage);
++            break;
++          default:
++            ok(false, "Something went wrong")
++            break
++        }
++      }
++    });
++
++    navigator.serviceWorker.ready.then(function() {
++      parent.postMessage({status: "callback", data: "ready"}, "*");
++    });
++
++    navigator.serviceWorker.addEventListener("message", function(event) {
++      parent.postMessage(event.data, "*");
++    });
++  }
++
++  </script>
++</head>
++<body onload="onLoad()">
++</body>
++</html>
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_cors_response_intercept_worker.js b/dom/workers/test/serviceworkers/eventsource/eventsource_cors_response_intercept_worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource_cors_response_intercept_worker.js
+@@ -0,0 +1,19 @@
++// Cross origin request
++var prefix = 'http://example.com/tests/dom/workers/test/serviceworkers/eventsource/';
++
++self.importScripts('eventsource_worker_helper.js');
++
++self.addEventListener('fetch', function (event) {
++  var request = event.request;
++  var url = new URL(request.url);
++
++  if (url.pathname !== '/tests/dom/workers/test/serviceworkers/eventsource/eventsource.resource') {
++    return;
++  }
++
++  ok(request.mode === 'cors', 'EventSource should make a CORS request');
++  var fetchRequest = new Request(prefix + 'eventsource.resource', { mode: 'cors'});
++  event.respondWith(fetch(fetchRequest).then((fetchResponse) => {
++    return fetchResponse;
++  }));
++});
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_mixed_content_cors_response.html b/dom/workers/test/serviceworkers/eventsource/eventsource_mixed_content_cors_response.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource_mixed_content_cors_response.html
+@@ -0,0 +1,75 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1182103 - Test EventSource scenarios with fetch interception</title>
++  <script type="text/javascript">
++
++  var prefix = "https://example.com/tests/dom/workers/test/serviceworkers/eventsource/";
++
++  function ok(aCondition, aMessage) {
++    parent.postMessage({status: "callback", data: "ok", condition: aCondition, message: aMessage}, "*");
++  }
++
++  function doUnregister() {
++    navigator.serviceWorker.getRegistration().then(swr => {
++      swr.unregister().then(function(result) {
++        ok(result, "Unregister should return true.");
++        parent.postMessage({status: "callback", data: "done"}, "*");
++      }, function(e) {
++        ok(false, "Unregistering the SW failed with " + e);
++      });
++    });
++  }
++
++  function doEventSource() {
++    var source = new EventSource(prefix + "eventsource.resource");
++    source.onmessage = function(e) {
++      source.onmessage = null;
++      source.close();
++      ok(false, "Something went wrong");
++    };
++    source.onerror = function(error) {
++      source.onmessage = null;
++      source.close();
++      ok(true, "EventSource should not work with mixed content cors responses");
++      doUnregister();
++    };
++  }
++
++  function onLoad() {
++    if (!parent) {
++      dump("eventsource/eventsource_cors_response.html shouldn't be launched directly!");
++    }
++
++    window.addEventListener("message", function onMessage(e) {
++      if (e.data.status === "callback") {
++        switch(e.data.data) {
++          case "eventsource":
++            doEventSource();
++            window.removeEventListener("message", onMessage);
++            break;
++          default:
++            ok(false, "Something went wrong")
++            break
++        }
++      }
++    });
++
++    navigator.serviceWorker.ready.then(function() {
++      parent.postMessage({status: "callback", data: "ready"}, "*");
++    });
++
++    navigator.serviceWorker.addEventListener("message", function(event) {
++      parent.postMessage(event.data, "*");
++    });
++  }
++
++  </script>
++</head>
++<body onload="onLoad()">
++</body>
++</html>
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_mixed_content_cors_response_intercept_worker.js b/dom/workers/test/serviceworkers/eventsource/eventsource_mixed_content_cors_response_intercept_worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource_mixed_content_cors_response_intercept_worker.js
+@@ -0,0 +1,18 @@
++var prefix = 'http://example.com/tests/dom/workers/test/serviceworkers/eventsource/';
++
++self.importScripts('eventsource_worker_helper.js');
++
++self.addEventListener('fetch', function (event) {
++  var request = event.request;
++  var url = new URL(request.url);
++
++  if (url.pathname !== '/tests/dom/workers/test/serviceworkers/eventsource/eventsource.resource') {
++    return;
++  }
++
++  ok(request.mode === 'cors', 'EventSource should make a CORS request');
++  var fetchRequest = new Request(prefix + 'eventsource.resource', { mode: 'cors'});
++  event.respondWith(fetch(fetchRequest).then((fetchResponse) => {
++    return fetchResponse;
++  }));
++});
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_opaque_response.html b/dom/workers/test/serviceworkers/eventsource/eventsource_opaque_response.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource_opaque_response.html
+@@ -0,0 +1,75 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1182103 - Test EventSource scenarios with fetch interception</title>
++  <script type="text/javascript">
++
++  var prefix = "http://mochi.test:8888/tests/dom/workers/test/serviceworkers/eventsource/";
++
++  function ok(aCondition, aMessage) {
++    parent.postMessage({status: "callback", data: "ok", condition: aCondition, message: aMessage}, "*");
++  }
++
++  function doUnregister() {
++    navigator.serviceWorker.getRegistration().then(swr => {
++      swr.unregister().then(function(result) {
++        ok(result, "Unregister should return true.");
++        parent.postMessage({status: "callback", data: "done"}, "*");
++      }, function(e) {
++        ok(false, "Unregistering the SW failed with " + e);
++      });
++    });
++  }
++
++  function doEventSource() {
++    var source = new EventSource(prefix + "eventsource.resource");
++    source.onmessage = function(e) {
++      source.onmessage = null;
++      source.close();
++      ok(false, "Something went wrong");
++    };
++    source.onerror = function(error) {
++      source.onmessage = null;
++      source.close();
++      ok(true, "EventSource should not work with opaque responses");
++      doUnregister();
++    };
++  }
++
++  function onLoad() {
++    if (!parent) {
++      dump("eventsource/eventsource_opaque_response.html shouldn't be launched directly!");
++    }
++
++    window.addEventListener("message", function onMessage(e) {
++      if (e.data.status === "callback") {
++        switch(e.data.data) {
++          case "eventsource":
++            doEventSource();
++            window.removeEventListener("message", onMessage);
++            break;
++          default:
++            ok(false, "Something went wrong")
++            break
++        }
++      }
++    });
++
++    navigator.serviceWorker.ready.then(function() {
++      parent.postMessage({status: "callback", data: "ready"}, "*");
++    });
++
++    navigator.serviceWorker.addEventListener("message", function(event) {
++      parent.postMessage(event.data, "*");
++    });
++  }
++
++  </script>
++</head>
++<body onload="onLoad()">
++</body>
++</html>
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_opaque_response_intercept_worker.js b/dom/workers/test/serviceworkers/eventsource/eventsource_opaque_response_intercept_worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource_opaque_response_intercept_worker.js
+@@ -0,0 +1,19 @@
++// Cross origin request
++var prefix = 'http://example.com/tests/dom/workers/test/serviceworkers/eventsource/';
++
++self.importScripts('eventsource_worker_helper.js');
++
++self.addEventListener('fetch', function (event) {
++  var request = event.request;
++  var url = new URL(request.url);
++
++  if (url.pathname !== '/tests/dom/workers/test/serviceworkers/eventsource/eventsource.resource') {
++    return;
++  }
++
++  ok(request.mode === 'cors', 'EventSource should make a CORS request');
++  var fetchRequest = new Request(prefix + 'eventsource.resource', { mode: 'no-cors'});
++  event.respondWith(fetch(fetchRequest).then((fetchResponse) => {
++    return fetchResponse;
++  }));
++});
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_register_worker.html b/dom/workers/test/serviceworkers/eventsource/eventsource_register_worker.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource_register_worker.html
+@@ -0,0 +1,27 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1182103 - Test EventSource scenarios with fetch interception</title>
++  <script type="text/javascript">
++
++  function getURLParam (aTarget, aValue) {
++    return decodeURI(aTarget.search.replace(new RegExp("^(?:.*[&\\?]" + encodeURI(aValue).replace(/[\.\+\*]/g, "\\$&") + "(?:\\=([^&]*))?)?.*$", "i"), "$1"));
++  }
++
++  function onLoad() {
++    navigator.serviceWorker.ready.then(function() {
++      parent.postMessage({status: "callback", data: "done"}, "*");
++    });
++
++    navigator.serviceWorker.register(getURLParam(document.location, "script"), {scope: "."});
++  }
++
++  </script>
++</head>
++<body onload="onLoad()">
++</body>
++</html>
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_synthetic_response.html b/dom/workers/test/serviceworkers/eventsource/eventsource_synthetic_response.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource_synthetic_response.html
+@@ -0,0 +1,75 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1182103 - Test EventSource scenarios with fetch interception</title>
++  <script type="text/javascript">
++
++  var prefix = "http://mochi.test:8888/tests/dom/workers/test/serviceworkers/eventsource/";
++
++  function ok(aCondition, aMessage) {
++    parent.postMessage({status: "callback", data: "ok", condition: aCondition, message: aMessage}, "*");
++  }
++
++  function doUnregister() {
++    navigator.serviceWorker.getRegistration().then(swr => {
++      swr.unregister().then(function(result) {
++        ok(result, "Unregister should return true.");
++        parent.postMessage({status: "callback", data: "done"}, "*");
++      }, function(e) {
++        ok(false, "Unregistering the SW failed with " + e);
++      });
++    });
++  }
++
++  function doEventSource() {
++    var source = new EventSource(prefix + "eventsource.resource");
++    source.onmessage = function(e) {
++      source.onmessage = null;
++      source.close();
++      ok(true, "EventSource should work with synthetic responses");
++      doUnregister();
++    };
++    source.onerror = function(error) {
++      source.onmessage = null;
++      source.close();
++      ok(false, "Something went wrong");
++    };
++  }
++
++  function onLoad() {
++    if (!parent) {
++      dump("eventsource/eventsource_synthetic_response.html shouldn't be launched directly!");
++    }
++
++    window.addEventListener("message", function onMessage(e) {
++      if (e.data.status === "callback") {
++        switch(e.data.data) {
++          case "eventsource":
++            doEventSource();
++            window.removeEventListener("message", onMessage);
++            break;
++          default:
++            ok(false, "Something went wrong")
++            break
++        }
++      }
++    });
++
++    navigator.serviceWorker.ready.then(function() {
++      parent.postMessage({status: "callback", data: "ready"}, "*");
++    });
++
++    navigator.serviceWorker.addEventListener("message", function(event) {
++      parent.postMessage(event.data, "*");
++    });
++  }
++
++  </script>
++</head>
++<body onload="onLoad()">
++</body>
++</html>
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_synthetic_response_intercept_worker.js b/dom/workers/test/serviceworkers/eventsource/eventsource_synthetic_response_intercept_worker.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource_synthetic_response_intercept_worker.js
+@@ -0,0 +1,27 @@
++self.importScripts('eventsource_worker_helper.js');
++
++self.addEventListener('fetch', function (event) {
++  var request = event.request;
++  var url = new URL(request.url);
++
++  if (url.pathname !== '/tests/dom/workers/test/serviceworkers/eventsource/eventsource.resource') {
++    return;
++  }
++
++  ok(request.mode === 'cors', 'EventSource should make a CORS request');
++  var headerList = {
++    'Content-Type': 'text/event-stream',
++    'Cache-Control': 'no-cache, must-revalidate'
++  };
++  var headers = new Headers(headerList);
++  var init = {
++    headers: headers,
++    mode: 'cors'
++  };
++  var body =
++    'retry:500 ' +
++    'data: 2 ' +
++    'unknow: unknow ';
++  var response = new Response(body, init);
++  event.respondWith(response);
++});
+diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
+--- a/dom/workers/test/serviceworkers/mochitest.ini
++++ b/dom/workers/test/serviceworkers/mochitest.ini
+@@ -151,16 +151,17 @@ support-files =
+   sw_clients/navigator.html
+   eval_worker.js
+   test_eval_not_allowed.html^headers^
+   opaque_intercept_worker.js
+   notify_loaded.js
+   test_request_context.js
+   fetch_event_client.js
+   sw_clients/dummy.html
++  eventsource/*
+ 
+ [test_app_protocol.html]
+ skip-if = release_build
+ [test_bug1151916.html]
+ [test_claim.html]
+ [test_claim_fetch.html]
+ [test_claim_oninstall.html]
+ [test_close.html]
+@@ -239,8 +240,9 @@ skip-if = toolkit == "android" || toolki
+ [test_strict_mode_warning.html]
+ [test_third_party_iframes.html]
+ [test_unregister.html]
+ [test_workerUnregister.html]
+ [test_workerUpdate.html]
+ [test_workerupdatefoundevent.html]
+ [test_opaque_intercept.html]
+ [test_fetch_event_client_postmessage.html]
++[test_eventsource_intercept.html]
+diff --git a/dom/workers/test/serviceworkers/test_eventsource_intercept.html b/dom/workers/test/serviceworkers/test_eventsource_intercept.html
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/test_eventsource_intercept.html
+@@ -0,0 +1,105 @@
++<!--
++  Any copyright is dedicated to the Public Domain.
++  http://creativecommons.org/publicdomain/zero/1.0/
++-->
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 1182103 - Test EventSource scenarios with fetch interception</title>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++</head>
++<body>
++<p id="display"></p>
++<div id="content" style="display: none"></div>
++<pre id="test"></pre>
++<script class="testbody" type="text/javascript">
++
++  function testFrame(src) {
++    return new Promise(function(resolve, reject) {
++      var iframe = document.createElement("iframe");
++      iframe.src = src;
++      window.onmessage = function(e) {
++        if (e.data.status == "callback") {
++          switch(e.data.data) {
++            case "ok":
++              ok(e.data.condition, e.data.message);
++              break;
++            case "ready":
++              iframe.contentWindow.postMessage({status: "callback", data: "eventsource"}, "*");
++              break;
++            case "done":
++              window.onmessage = null;
++              iframe.src = "about:blank";
++              document.body.removeChild(iframe);
++              iframe = null;
++              resolve();
++              break;
++            default:
++              ok(false, "Something went wrong");
++              break;
++          }
++        } else {
++          ok(false, "Something went wrong");
++        }
++      };
++      document.body.appendChild(iframe);
++    });
++  }
++
++  function runTest() {
++      Promise.resolve()
++        .then(() => {
++        info("Going to intercept and test opaque responses");
++        return testFrame("eventsource/eventsource_register_worker.html" +
++                         "?script=eventsource_opaque_response_intercept_worker.js");
++      })
++      .then(() => {
++        return testFrame("eventsource/eventsource_opaque_response.html");
++      })
++      .then(() => {
++        info("Going to intercept and test cors responses");
++        return testFrame("eventsource/eventsource_register_worker.html" +
++                         "?script=eventsource_cors_response_intercept_worker.js");
++      })
++      .then(() => {
++        return testFrame("eventsource/eventsource_cors_response.html");
++      })
++      .then(() => {
++        info("Going to intercept and test synthetic responses");
++        return testFrame("eventsource/eventsource_register_worker.html" +
++                         "?script=eventsource_synthetic_response_intercept_worker.js");
++      })
++      .then(() => {
++        return testFrame("eventsource/eventsource_synthetic_response.html");
++      })
++      .then(() => {
++        info("Going to intercept and test mixed content cors responses");
++        return testFrame("https://example.com/tests/dom/workers/test/serviceworkers/" +
++                         "eventsource/eventsource_register_worker.html" +
++                         "?script=eventsource_mixed_content_cors_response_intercept_worker.js");
++      })
++      .then(() => {
++        return testFrame("https://example.com/tests/dom/workers/test/serviceworkers/" +
++                         "eventsource/eventsource_mixed_content_cors_response.html");
++      })
++      .then(SimpleTest.finish)
++      .catch(function(e) {
++        ok(false, "Some test failed with error " + e);
++        SimpleTest.finish();
++      });
++  }
++
++  SimpleTest.waitForExplicitFinish();
++  SpecialPowers.pushPrefEnv({"set": [
++    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
++    ["dom.serviceWorkers.enabled", true],
++    ["dom.serviceWorkers.testing.enabled", true],
++    ["dom.serviceWorkers.interception.enabled", true],
++    ["dom.serviceWorkers.interception.opaque.enabled", true],
++    ["dom.caches.enabled", true],
++  ]}, runTest);
++</script>
++</pre>
++</body>
++</html>
