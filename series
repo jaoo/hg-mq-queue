@@ -1,5 +1,11 @@
-enable-sw-b2g.patch
-1179161.patch
-1171917.patch
-1175949-debug.patch
+1182103.patch
 try.patch
+1182095.patch
+1178233-debug.patch
+1182091.patch
+enable-sw-b2g.patch
+try-1178233.patch
+1181351.patch
+1181351-debug.patch
+1171917-browser-b2g.patch
+1175949-debug.patch
