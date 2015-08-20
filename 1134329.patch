@@ -1,12 +1,12 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  f384789a29dcfd514d25d4a16a97ec5309612d78
+# Parent  29b2df16e961fbe9a379362ecba6f888d1754bc3
 Bug 1134329 - Service worker install and activate events not fired when updating the service worker javascript file. r=nsm,ochameau
 
 diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
 --- a/browser/app/profile/firefox.js
 +++ b/browser/app/profile/firefox.js
-@@ -1464,16 +1464,19 @@ pref("devtools.performance.ui.experiment
+@@ -1456,16 +1456,19 @@ pref("devtools.performance.ui.experiment
  #endif
  
  // The default cache UI setting
@@ -413,7 +413,7 @@ diff --git a/browser/locales/en-US/chrome/browser/devtools/toolbox.dtd b/browser
 diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
 --- a/dom/base/nsDOMWindowUtils.cpp
 +++ b/dom/base/nsDOMWindowUtils.cpp
-@@ -3899,16 +3899,42 @@ nsDOMWindowUtils::GetServiceWorkersTesti
+@@ -3878,16 +3878,42 @@ nsDOMWindowUtils::GetServiceWorkersTesti
    NS_ENSURE_STATE(window);
  
    *aEnabled = window->GetServiceWorkersTestingEnabled();
@@ -544,7 +544,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
  interface nsIContentPermissionRequest;
  interface nsIObserver;
  
--[scriptable, uuid(47fa312b-2ad1-4b80-8a0a-c9822e2d1ec9)]
+-[scriptable, uuid(6ddc9a79-18cd-4dbc-9975-68928e6c9857)]
 +[scriptable, uuid(e97634c8-9abf-4a54-ac72-5c09ef130207)]
  interface nsIDOMWindowUtils : nsISupports {
  
@@ -554,7 +554,7 @@ diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsI
     * to the given value. That is, when set to kDontAnimMode, all images
     * will stop animating. The attribute's value must be one of the
     * animationMode values from imgIContainer.
-@@ -1814,16 +1814,22 @@ interface nsIDOMWindowUtils : nsISupport
+@@ -1801,16 +1801,22 @@ interface nsIDOMWindowUtils : nsISupport
                         in int32_t aLeft);
  
    /**
