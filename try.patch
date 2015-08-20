@@ -1,0 +1,5 @@
+# HG changeset patch
+# User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
+# Parent  428be1a7850fe1998513aa05a81eb1db7572f4a5
+try: -b do -p all -u all -t none
+
