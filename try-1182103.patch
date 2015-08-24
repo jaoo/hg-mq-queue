@@ -1,5 +1,5 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  3291762055e0f74dcdd7f08bf14705397b6d3aa8
-try: -b do -p all -u mochitest-4,mochitest-e10s-4 -t none
+# Parent  9d75c6c4ee2e26e57bc88ca7cf8809651ceb5b9c
+try: -b d -p linux,linux64,linux64-asan,linux64-st-an,linux64-valgrind -u mochitest-4,mochitest-e10s-4 -t none
 

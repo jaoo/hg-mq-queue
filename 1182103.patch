@@ -1,6 +1,6 @@
 # HG changeset patch
 # User Jose Antonio Olivera Ortega <jaoo@jaoo.es>
-# Parent  0876695d1abdeb363a780bda8b6cc84f20ba51c9
+# Parent  8a6045d14d6bd348a3b5bfeb55a9321e680cc93e
 Bug 1182103 - Test EventSource scenarios with fetch interception
 
 diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource.resource b/dom/workers/test/serviceworkers/eventsource/eventsource.resource
@@ -79,7 +79,7 @@ new file mode 100644
 +      doUnregister();
 +    };
 +    source.onerror = function(error) {
-+      source.onmessage = null;
++      source.onerror = null;
 +      source.close();
 +      ok(false, "Something went wrong");
 +    };
@@ -182,7 +182,7 @@ new file mode 100644
 +      ok(false, "Something went wrong");
 +    };
 +    source.onerror = function(error) {
-+      source.onmessage = null;
++      source.onerror = null;
 +      source.close();
 +      ok(true, "EventSource should not work with mixed content cors responses");
 +      doUnregister();
@@ -285,7 +285,7 @@ new file mode 100644
 +      ok(false, "Something went wrong");
 +    };
 +    source.onerror = function(error) {
-+      source.onmessage = null;
++      source.onerror = null;
 +      source.close();
 +      ok(true, "EventSource should not work with opaque responses");
 +      doUnregister();
@@ -465,7 +465,7 @@ diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_synthetic_r
 new file mode 100644
 --- /dev/null
 +++ b/dom/workers/test/serviceworkers/eventsource/eventsource_synthetic_response_intercept_worker.js
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,24 @@
 +self.importScripts('eventsource_worker_helper.js');
 +
 +self.addEventListener('fetch', function (event) {
@@ -486,13 +486,27 @@ new file mode 100644
 +    headers: headers,
 +    mode: 'cors'
 +  };
-+  var body =
-+    'retry:500 ' +
-+    'data: 2 ' +
-+    'unknow: unknow ';
++  var body = 'data: data0\r\r';
 +  var response = new Response(body, init);
 +  event.respondWith(response);
 +});
+diff --git a/dom/workers/test/serviceworkers/eventsource/eventsource_worker_helper.js b/dom/workers/test/serviceworkers/eventsource/eventsource_worker_helper.js
+new file mode 100644
+--- /dev/null
++++ b/dom/workers/test/serviceworkers/eventsource/eventsource_worker_helper.js
+@@ -0,0 +1,12 @@
++function ok(aCondition, aMessage) {
++  return new Promise(function(resolve, reject) {
++    self.clients.matchAll().then(function(res) {
++      if (!res.length) {
++        reject();
++        return;
++      }
++      res[0].postMessage({status: "callback", data: "ok", condition: aCondition, message: aMessage});
++      resolve();
++    });
++  });
++}
 diff --git a/dom/workers/test/serviceworkers/mochitest.ini b/dom/workers/test/serviceworkers/mochitest.ini
 --- a/dom/workers/test/serviceworkers/mochitest.ini
 +++ b/dom/workers/test/serviceworkers/mochitest.ini
